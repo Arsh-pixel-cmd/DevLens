@@ -70,12 +70,87 @@ export class DevLensUI {
     }, 500);
   }
 
+  setRipper(ripper) {
+    this.ripper = ripper;
+  }
+
+  addDetectedApi(name) {
+    if (!this.apis) this.apis = new Set();
+    if (!this.apis.has(name)) {
+      this.apis.add(name);
+      this.updateTechTab();
+    }
+  }
+
+  updateRipperState(active) {
+    const btn = this.root.querySelector('#toggle-ripper');
+    if (btn) {
+      btn.textContent = active ? 'Exit Inspector' : 'Inspect Component';
+      btn.classList.toggle('active', active);
+    }
+  }
+
+  showGeneratedCode(code) {
+    // Switch to export tab and show code
+    this.root.querySelector('[data-tab="export"]').click();
+    const area = this.root.querySelector('.code-export');
+    if (area) area.value = code;
+    const title = this.root.querySelector('.section-title.export-title');
+    if (title) title.textContent = 'Extracted Component';
+  }
+
+  updateTechTab() {
+    const el = this.root.querySelector('#panel-tech');
+    if (el && el.classList.contains('active')) {
+      el.innerHTML = this.renderTechTab();
+
+      // Re-attach start scan
+      const scanBtn = this.root.querySelector('#start-scan');
+      if (scanBtn) {
+        scanBtn.addEventListener('click', () => this.handleScan(scanBtn));
+      }
+    }
+  }
+
+  handleScan(scanBtn) {
+    scanBtn.disabled = true;
+    scanBtn.textContent = 'Scanning...';
+    this.root.querySelector('.scan-progress').classList.add('active');
+
+    this.scanner.startActiveScan(
+      (progress) => { },
+      (results) => {
+        this.designData = results.design;
+        this.animations = results.animations || [];
+        this.updateDesignTabs();
+
+        this.root.querySelector('.scan-progress').classList.remove('active');
+        scanBtn.textContent = 'Scan Complete';
+        scanBtn.disabled = false;
+
+        if (this.animations.length) this.showToast(`${this.animations.length} animations found`);
+      }
+    );
+  }
+
   renderTechTab() {
     const categories = ['frameworks', 'cssFrameworks', 'libraries'];
     let html = '';
 
     // Scan Button
     html += `<button class="btn-primary" id="start-scan">Start Active Scan</button>`;
+
+    // APIs
+    if (this.apis && this.apis.size > 0) {
+      html += `<div class="section-title" style="margin-top:16px; color:#ff79c6">Backend / APIs</div>
+        <div class="card-grid">
+          ${Array.from(this.apis).map(api => `
+             <div class="tech-badge" style="border-color: rgba(255, 121, 198, 0.4);">
+               <span>${api}</span>
+             </div>
+          `).join('')}
+        </div>`;
+    }
 
     categories.forEach(cat => {
       const items = this.techData[cat] || [];
@@ -129,13 +204,15 @@ export class DevLensUI {
 
   renderToolsTab() {
     return `
-        <div class="section-title">Time Warp</div>
+        <div class="section-title">Component Ripper</div>
+        <button class="btn-secondary" id="toggle-ripper" style="width:100%; justify-content:center;">Inspect Component</button>
+      
+        <div class="section-title">Time Warp & Animations</div>
         <input type="range" min="0.1" max="2" step="0.1" value="1" id="speed-slider">
-        <div style="display:flex; justify-content:space-between; font-size:10px; opacity:0.6; margin-top:4px;">
-            <span>Slow (0.1x)</span>
-            <span>Normal (1x)</span>
-            <span>Fast (2x)</span>
+        <div style="font-size:10px; opacity:0.6; display:flex; justify-content:space-between;">
+             <span>0.1x</span><span>1.0x</span><span>2.0x</span>
         </div>
+        ${this.renderAnimationList()}
 
         <div class="section-title">Ghost Overlay</div>
         <input type="file" id="overlay-upload" accept="image/*" style="font-size:12px;">
@@ -145,11 +222,23 @@ export class DevLensUI {
       `;
   }
 
+  renderAnimationList() {
+    if (!this.animations || !this.animations.length) return '';
+    return `<div style="margin-top:10px; max-height:100px; overflow-y:auto;">
+         ${this.animations.map(a => `
+           <div class="tech-badge" style="font-size:10px; padding:6px;">
+             <span>${a.type}</span>
+             <span style="color:#d8b4fe" class="copy-easing" data-easing="${a.easing}">${a.easing}</span>
+           </div>
+         `).join('')}
+      </div>`;
+  }
+
   renderExportTab() {
     return `
-        <div class="section-title">Tailwind Config</div>
+        <div class="section-title export-title">Tailwind Config</div>
         <textarea class="code-export" style="width:100%; height:150px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#a6e22e; font-family:monospace; font-size:11px; padding:8px;" readonly>${this.generateTailwindConfig()}</textarea>
-        <button class="btn-primary" id="copy-config">Copy Config</button>
+        <button class="btn-primary" id="copy-config">Copy Code</button>
        `;
   }
 
@@ -240,7 +329,59 @@ module.exports = {
         const color = e.target.getAttribute('data-copy');
         copyToClipboard(color).then(() => this.showToast(`Copied ${color}`));
       }
+
+      // Copy Easing
+      if (e.target.classList.contains('copy-easing')) {
+        const easing = e.target.getAttribute('data-easing');
+        copyToClipboard(easing).then(() => this.showToast('Copied Easing!'));
+      }
+      if (e.target.id === 'copy-config') {
+        const code = this.root.querySelector('.code-export').value;
+        copyToClipboard(code).then(() => this.showToast('Copied Code!'));
+      }
     });
+
+    // Ripper
+    const ripperBtn = this.root.querySelector('#toggle-ripper');
+    if (ripperBtn) {
+      ripperBtn.addEventListener('click', () => {
+        const isActive = ripperBtn.classList.contains('active');
+        if (this.ripper) {
+          this.ripper.toggle(!isActive);
+          this.updateRipperState(!isActive);
+        }
+      });
+    }
+
+    // Ghost Overlay Upload
+    const upload = this.root.querySelector('#overlay-upload');
+    if (upload) {
+      upload.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            this.createGhostOverlay(evt.target.result);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+  }
+
+  createGhostOverlay(url) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.position = 'fixed';
+    img.style.top = '0';
+    img.style.left = '0';
+    img.style.width = '100vw'; // full width
+    img.style.opacity = '0.5';
+    img.style.pointerEvents = 'none'; // click through
+    img.style.zIndex = 2147483645;
+    img.id = 'devlens-ghost';
+    document.body.appendChild(img);
+    this.showToast('Overlay Loaded (50% Opacity)');
   }
 
   updateDesignTabs() {

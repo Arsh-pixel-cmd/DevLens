@@ -17,6 +17,49 @@
         }
     }
 
+    // --- Network Sniffer (API Blueprint) ---
+    // Monkey-patch fetch and XHR
+    const originalFetch = win.fetch;
+    win.fetch = async function (...args) {
+        const url = args[0] instanceof Request ? args[0].url : args[0];
+        checkApi(url);
+        return originalFetch.apply(this, args);
+    };
+
+    const originalOpen = win.XMLHttpRequest.prototype.open;
+    win.XMLHttpRequest.prototype.open = function (method, url) {
+        checkApi(url);
+        return originalOpen.apply(this, arguments);
+    };
+
+    const detectedApis = new Set();
+
+    function checkApi(url) {
+        if (!url) return;
+
+        const signatures = {
+            'firestore.googleapis.com': 'Firebase Firestore',
+            'firebaseio.com': 'Firebase Realtime DB',
+            'supabase.co': 'Supabase',
+            'api.stripe.com': 'Stripe',
+            'algolia.net': 'Algolia',
+            'contentful.com': 'Contentful',
+            'shopify.com': 'Shopify',
+            'sentry.io': 'Sentry',
+            'intercom.io': 'Intercom'
+        };
+
+        for (const [domain, name] of Object.entries(signatures)) {
+            if (url.includes(domain)) {
+                if (!detectedApis.has(name)) {
+                    detectedApis.add(name);
+                    // Send to content script
+                    window.postMessage({ type: 'DEVLENS_API_DETECTED', name }, '*');
+                }
+            }
+        }
+    }
+
     // --- Frameworks ---
     if (win.React || (win._REACT_DEVTOOLS_GLOBAL_HOOK_ && win._REACT_DEVTOOLS_GLOBAL_HOOK_.renderers?.size > 0)) {
         const version = win.React?.version || 'Unknown';

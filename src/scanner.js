@@ -109,12 +109,20 @@ export class DevLensScanner {
     scanAnimations() {
         if (document.getAnimations) {
             this.animations = document.getAnimations().map(anim => {
-                // Return serialization-friendly object
+                let easing = 'linear';
+                let duration = 0;
+
+                if (anim.effect) {
+                    const timing = anim.effect.getTiming();
+                    easing = timing.easing || 'linear';
+                    duration = timing.duration;
+                }
+
                 return {
                     id: anim.id || 'Anonymous',
-                    startTime: anim.startTime,
-                    playbackRate: anim.playbackRate,
-                    type: anim instanceof CSSTransition ? 'Transition' : 'Animation'
+                    type: anim instanceof CSSTransition ? 'Transition' : 'Animation',
+                    easing: easing,
+                    duration: duration
                 };
             });
         }

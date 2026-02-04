@@ -15,10 +15,10 @@ chrome.action.onClicked.addListener(async (tab) => {
 
     const techData = detectionResults[0]?.result || {};
 
-    // 2. Inject the Content Script (Isolated World) to handle UI
+    // 2. Inject the Injector Script (Isolated World) to handle UI
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ['src/content.js']
+      files: ['src/injector.js']
     });
 
     // 3. Send the detected data to the content script

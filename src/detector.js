@@ -9,61 +9,75 @@
 
     const win = window;
 
+    // Helper to add with confidence
+    function add(cat, name, ver = null, confidence = 'High') {
+        // Avoid dupes
+        if (!data[cat].find(i => i.name === name)) {
+            data[cat].push({ name, version: ver, confidence });
+        }
+    }
+
     // --- Frameworks ---
     if (win.React || (win._REACT_DEVTOOLS_GLOBAL_HOOK_ && win._REACT_DEVTOOLS_GLOBAL_HOOK_.renderers?.size > 0)) {
-        data.frameworks.push('React');
+        const version = win.React?.version || 'Unknown';
+        add('frameworks', 'React', version, '100%');
     }
     if (win.Vue || win.__VUE__) {
-        data.frameworks.push('Vue');
+        add('frameworks', 'Vue', win.Vue?.version, '100%');
     }
     if (win.next) {
-        data.frameworks.push('Next.js');
+        add('frameworks', 'Next.js', win.next.version, 'High');
+    }
+    if (document.getElementById('__next')) {
+        add('frameworks', 'Next.js', null, 'High');
     }
     if (win.angular || document.querySelector('[ng-version]')) {
-        data.frameworks.push('Angular');
+        const ver = document.querySelector('[ng-version]')?.getAttribute('ng-version');
+        add('frameworks', 'Angular', ver, 'High');
     }
     if (win.Svelte) {
-        data.frameworks.push('Svelte');
+        add('frameworks', 'Svelte', null, 'High');
     }
 
     // --- Libraries ---
-    if (win.gsap || win.TweenMax) data.libraries.push('GSAP');
-    if (win.THREE) data.libraries.push('Three.js');
-    // Framer Motion is harder to detect globally as it's often bundled, checking for typical markers or specific attribute patterns might be needed,
-    // but often it leaves no global. We'll check for a common signature if possible, otherwise rely on classnames if distinct.
-    // For now, simple global check:
-    if (win.Motion || document.querySelector('[style*="transform"][style*="framer"]')) {
-        // rudimentary heuristic
-        data.libraries.push('Framer Motion (Likely)');
+    if (win.gsap || win.TweenMax) {
+        add('libraries', 'GSAP', win.gsap?.version, 'High');
+    }
+    if (win.THREE) {
+        add('libraries', 'Three.js', win.THREE.REVISION, 'High');
+    }
+    if (win.Motion) {
+        add('libraries', 'Framer Motion', null, 'High');
+    }
+    // Heuristic for Framer Motion
+    if (document.querySelector('[style*="transform"][style*="framer"]')) {
+        add('libraries', 'Framer Motion', null, 'Medium (Heuristic)');
+    }
+    if (win.jQuery) {
+        add('libraries', 'jQuery', win.jQuery.fn.jquery, 'High');
     }
 
     // --- CSS Frameworks ---
-    // Tailwind: Look for typical utility classes or some specific variable patterns if available
-    // Simple regex on a sample of elements or check stylesheets rules is expensive.
-    // We'll check for a few known indicators.
-    const hasTailwind = Array.from(document.querySelectorAll('*')).some(el => {
-        // Check a few widely used classes
-        return el.classList.contains('flex') || el.classList.contains('p-4') || el.classList.contains('text-center');
-    }) && (detectTailwindVars());
-
-    if (hasTailwind || detectTailwindVars()) data.cssFrameworks.push('Tailwind CSS');
-
-    if (win.bootstrap || document.querySelector('.container') && document.querySelector('.row')) {
-        // Weak heuristic for bootstrap but checking vars is better
-        if (getComputedStyle(document.body).getPropertyValue('--bs-primary')) {
-            data.cssFrameworks.push('Bootstrap');
-        }
-    }
+    // Tailwind
+    const hasTailwindClasses = Array.from(document.querySelectorAll('div')).some(el => {
+        return el.classList.contains('flex') && (el.classList.contains('p-4') || el.classList.contains('items-center'));
+    });
 
     function detectTailwindVars() {
-        // fast check for --tw var
-        const checkEl = document.querySelector('body');
-        if (!checkEl) return false;
-        const styles = getComputedStyle(checkEl);
-        for (let i = 0; i < styles.length; i++) {
-            if (styles[i].startsWith('--tw-')) return true;
-        }
-        return false;
+        return Array.from(document.styleSheets).some(sheet => {
+            try {
+                // Can't access cross-origin rules easily, but we can check checking body computed style
+                return false;
+            } catch (e) { return false; }
+        }) || getComputedStyle(document.body).getPropertyValue('--tw-text-opacity') !== '';
+    }
+
+    if (hasTailwindClasses || detectTailwindVars()) {
+        add('cssFrameworks', 'Tailwind CSS', null, detectTailwindVars() ? 'High' : 'Medium');
+    }
+
+    if (win.bootstrap || (getComputedStyle(document.body).getPropertyValue('--bs-primary'))) {
+        add('cssFrameworks', 'Bootstrap', null, 'High');
     }
 
     return data;

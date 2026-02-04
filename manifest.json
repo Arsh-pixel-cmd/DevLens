@@ -1,24 +1,32 @@
 {
-  "manifest_version": 3,
-  "name": "DevLens",
-  "version": "1.0",
-  "description": "A design and tech snapshot of a webpage on demand.",
-  "permissions": [
-    "activeTab",
-    "scripting",
-    "storage"
-  ],
-  "host_permissions": [],
-  "background": {
-    "service_worker": "src/background.js"
-  },
-  "action": {
-    "default_title": "Activate DevLens"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["src/styles.css", "src/ui.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+    "manifest_version": 3,
+    "name": "DevLens",
+    "version": "1.0",
+    "description": "A design and tech snapshot of a webpage on demand.",
+    "permissions": [
+        "activeTab",
+        "scripting",
+        "storage"
+    ],
+    "host_permissions": [],
+    "background": {
+        "service_worker": "src/background.js"
+    },
+    "action": {
+        "default_title": "Activate DevLens"
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "src/styles.css",
+                "src/ui.js",
+                "src/detector.js",
+                "src/scanner.js",
+                "src/clipboard.js"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ]
 }

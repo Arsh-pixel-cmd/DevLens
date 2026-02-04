@@ -1,6 +1,6 @@
 # 🔮 DevLens Ultra
 
-**The "God-Mode" Browser Extension for Frontend Engineers.**  
+**The Ultimate Browser Extension for Frontend Engineers.**  
 *Reverse-engineer design systems, extract clean React code, and debut production animations—all in one click.*
 
 ![DevLens Hero](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white) 
@@ -15,7 +15,7 @@
 
 Built with performance in mind, it operates inside a **Shadow DOM** to ensure zero CSS bleed, uses `requestIdleCallback` for non-blocking analysis, and leverages **Manifest V3** for security and longevity.
 
-## ✨ "God-Tier" Features
+## ✨ Advanced Features
 
 ### 1. ⚛️ Component Ripper (The Killer Feature)
 Stop guessing how a UI component was built.

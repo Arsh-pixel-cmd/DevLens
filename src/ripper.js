@@ -93,19 +93,23 @@ export class ComponentRipper {
             ? el.innerText
             : null;
 
-        // Basic clean-up: convert styles to object
-        // TODO: Map to Tailwind if possible (complex)
-        // For now, inline styles React component
+        const meaningful = this.extractMeaningfulStyles(style);
+        const tailwindClasses = this.mapToTailwind(meaningful);
 
-        const meaningfulStyles = this.extractMeaningfulStyles(style);
+        // If we found tailwind classes, use them, otherwise style prop
+        let props = '';
+        if (tailwindClasses.length > 0) {
+            props = `className="${tailwindClasses.join(' ')}"`;
+        } else {
+            props = `style={${JSON.stringify(meaningful, null, 2)}}`;
+        }
 
-        let props = `style={${JSON.stringify(meaningfulStyles, null, 2)}}`;
         let content = text ? text : `{/* ... */}`;
 
         return `
 export default function ExtractedComponent() {
   return (
-    <${tag} 
+    <${tag}
       ${props}
     >
       ${content}
@@ -118,17 +122,92 @@ export default function ExtractedComponent() {
         const importantKeys = [
             'backgroundColor', 'color', 'borderRadius', 'border', 'padding', 'margin',
             'fontSize', 'fontWeight', 'fontFamily', 'display', 'flexDirection',
-            'justifyContent', 'alignItems', 'gap', 'boxShadow', 'width', 'height'
+            'justifyContent', 'alignItems', 'gap', 'boxShadow', 'width', 'height',
+            'position', 'top', 'left', 'zIndex', 'textAlign'
         ];
+
+        // Defaults to ignore to reduce noise
+        const defaults = {
+            'backgroundColor': ['rgba(0, 0, 0, 0)', 'transparent'],
+            'color': ['rgb(0, 0, 0)', 'rgba(0, 0, 0, 1)'], // dangerous assumption, but common default
+            'borderRadius': ['0px'],
+            'border': ['0px none rgb(0, 0, 0)', '0px none'],
+            'padding': ['0px'],
+            'margin': ['0px'],
+            'fontSize': ['16px'], // Browser default
+            'fontWeight': ['400', 'normal'],
+            'display': ['block'],
+            'position': ['static'],
+            'boxShadow': ['none'],
+            'textAlign': ['start', 'left']
+        };
 
         const res = {};
         importantKeys.forEach(key => {
             const val = computed[key];
-            // Filter defaults (simplistic)
-            if (val && val !== '0px' && val !== 'none' && val !== 'normal' && val !== 'auto' && val !== 'rgba(0, 0, 0, 0)') {
+            if (!val) return;
+
+            // Check against defaults
+            const isDefault = defaults[key]?.some(d => val === d || val.startsWith(d));
+
+            if (!isDefault) {
                 res[key] = val;
             }
         });
         return res;
+    }
+
+    // Basic Tailwind Mapper (Heuristic)
+    mapToTailwind(styles) {
+        const classes = [];
+
+        // Helper to match colors (naive)
+        // A real mapper needs a huge lookup table or proximity search.
+        // We will do simple structural mapping.
+
+        if (styles.display === 'flex') classes.push('flex');
+        if (styles.display === 'grid') classes.push('grid');
+        if (styles.flexDirection === 'column') classes.push('flex-col');
+        if (styles.justifyContent === 'center') classes.push('justify-center');
+        if (styles.justifyContent === 'space-between') classes.push('justify-between');
+        if (styles.alignItems === 'center') classes.push('items-center');
+
+        // Spacing (px -> rem -> tailwind unit)
+        // 1 unit = 0.25rem = 4px
+        const mapSpacing = (val, prefix) => {
+            if (!val || !val.endsWith('px')) return;
+            const px = parseInt(val);
+            if (px === 0) return;
+            const unit = Math.round(px / 4);
+            classes.push(`${prefix}-${unit}`);
+        };
+
+        mapSpacing(styles.padding, 'p');
+        mapSpacing(styles.margin, 'm');
+        mapSpacing(styles.gap, 'gap');
+        mapSpacing(styles.borderRadius, 'rounded');
+
+        if (styles.fontWeight === '700' || styles.fontWeight === 'bold') classes.push('font-bold');
+        if (styles.fontWeight === '600') classes.push('font-semibold');
+        if (styles.textAlign === 'center') classes.push('text-center');
+
+        // Colors - just pass arbitrary values if not simple?
+        // Tailwind allows arbitrary values: bg-[#123456]
+        if (styles.backgroundColor && !styles.backgroundColor.includes('rgba')) {
+            const hex = this.rgbToHex(styles.backgroundColor);
+            if (hex) classes.push(`bg-[${hex}]`);
+        }
+        if (styles.color && !styles.color.includes('rgba')) {
+            const hex = this.rgbToHex(styles.color);
+            if (hex) classes.push(`text-[${hex}]`);
+        }
+
+        return classes;
+    }
+
+    rgbToHex(rgb) {
+        const res = rgb.match(/\d+/g);
+        if (!res || res.length < 3) return null;
+        return "#" + ((1 << 24) + (+res[0] << 16) + (+res[1] << 8) + +res[2]).toString(16).slice(1);
     }
 }

@@ -6,19 +6,17 @@ export class DevLensScanner {
         this.animations = [];
     }
 
-    async startActiveScan(onProgress, onComplete) {
+    async startActiveScan(onProgress, onComplete, isQuick = false) {
         // 1. Auto-scroll
         onProgress(0.1);
-        await this.autoScroll();
+        await this.autoScroll(isQuick);
         onProgress(0.5);
 
-        // 2. Scan Design System (Visible Elements)
+        // 2. Scan Design (Visible)
         this.scanDesignSystem();
-        onProgress(0.8);
 
         // 3. Scan Animations
         this.scanAnimations();
-        onProgress(1.0);
 
         onComplete({
             design: this.designData,
@@ -26,18 +24,31 @@ export class DevLensScanner {
         });
     }
 
-    async autoScroll() {
+    async autoScroll(isQuick) {
         return new Promise((resolve) => {
             let totalHeight = document.body.scrollHeight;
             let distance = 100;
+            let travelled = 0;
+            let limit = isQuick ? 600 : totalHeight; // 500px + buffers
+
             let timer = setInterval(() => {
                 window.scrollBy(0, distance);
-                if (window.innerHeight + window.scrollY >= totalHeight - 50) {
+                travelled += distance;
+
+                // If quick scan, go back up after limit
+                if (isQuick && travelled >= limit) {
                     clearInterval(timer);
-                    window.scrollTo(0, 0); // Reset
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    resolve();
+                    return;
+                }
+
+                if (!isQuick && window.innerHeight + window.scrollY >= totalHeight - 50) {
+                    clearInterval(timer);
+                    window.scrollTo(0, 0);
                     resolve();
                 }
-            }, 50); // Fast scroll
+            }, 50);
         });
     }
 
@@ -101,9 +112,65 @@ export class DevLensScanner {
 
     // Clustering Logic (Smart Palette)
     clusterColors(hexArray) {
-        // Simple grouping by distinctness
-        // Real clustering (Delta E) is complex, we'll sort for now and provide categories
-        return hexArray.sort();
+        const clusters = {
+            'Primary': [],
+            'Secondary': [],
+            'Grays': [],
+            'Misc': []
+        };
+
+        hexArray.forEach(hex => {
+            const hsl = this.hexToHSL(hex);
+            if (!hsl) return;
+
+            if (hsl.s < 10 || hsl.l > 95 || hsl.l < 10) {
+                clusters.Grays.push(hex);
+            } else {
+                // Heuristic: Most frequent or first found are often primary? 
+                // We'll just dump colorful ones in Primary for now, 
+                // or separate by hue.
+                if (clusters.Primary.length < 5) clusters.Primary.push(hex);
+                else clusters.Secondary.push(hex);
+            }
+        });
+
+        // Flatten for display, but could be structured
+        return [
+            ...clusters.Primary,
+            ...clusters.Secondary,
+            ...clusters.Grays,
+            ...clusters.Misc
+        ];
+    }
+
+    hexToHSL(H) {
+        // Convert hex to RGB first
+        let r = 0, g = 0, b = 0;
+        if (H.length == 4) {
+            r = "0x" + H[1] + H[1];
+            g = "0x" + H[2] + H[2];
+            b = "0x" + H[3] + H[3];
+        } else if (H.length == 7) {
+            r = "0x" + H[1] + H[2];
+            g = "0x" + H[3] + H[4];
+            b = "0x" + H[5] + H[6];
+        }
+        // Then to HSL
+        r /= 255; g /= 255; b /= 255;
+        let cmin = Math.min(r, g, b), cmax = Math.max(r, g, b), delta = cmax - cmin;
+        let h = 0, s = 0, l = 0;
+
+        if (delta == 0) h = 0;
+        else if (cmax == r) h = ((g - b) / delta) % 6;
+        else if (cmax == g) h = (b - r) / delta + 2;
+        else h = (r - g) / delta + 4;
+        h = Math.round(h * 60);
+        if (h < 0) h += 360;
+        l = (cmax + cmin) / 2;
+        s = delta == 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+        s = +(s * 100).toFixed(1);
+        l = +(l * 100).toFixed(1);
+        return { h, s, l };
     }
 
     scanAnimations() {

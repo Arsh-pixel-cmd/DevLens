@@ -14,7 +14,7 @@ export class DevLensUI {
     this.root.innerHTML = `
       <div class="devlens-container">
         <div class="devlens-header">
-          <span class="devlens-title">DevLens Pro</span>
+          <span class="devlens-title">DevLens Ultra</span>
           <div class="actions-right">
              <button class="devlens-btn-icon" id="min-btn">_</button>
              <button class="devlens-btn-icon" id="close-btn">✕</button>
@@ -50,6 +50,24 @@ export class DevLensUI {
     `;
 
     this.attachEvents();
+
+    // Zero-Config Quick Scan (500px scroll)
+    this.runQuickScan();
+  }
+
+  runQuickScan() {
+    // Small delay to allow UI to settle
+    setTimeout(() => {
+      this.scanner.startActiveScan(
+        () => { },
+        (results) => {
+          this.designData = results.design;
+          // Don't auto-switch tabs, just update data
+          console.log('Quick scan complete');
+        },
+        true // isQuickScan mode (only 500px)
+      );
+    }, 500);
   }
 
   renderTechTab() {

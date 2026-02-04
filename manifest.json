@@ -22,7 +22,8 @@
                 "src/ui.js",
                 "src/detector.js",
                 "src/scanner.js",
-                "src/clipboard.js"
+                "src/clipboard.js",
+                "src/ripper.js"
             ],
             "matches": [
                 "<all_urls>"

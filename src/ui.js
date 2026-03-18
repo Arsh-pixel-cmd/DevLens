@@ -110,13 +110,18 @@ export class DevLensUI {
     this.root.innerHTML = `
       <div class="devlens-container figma-sidebar">
         <div class="devlens-header">
-          <span class="devlens-title">DevLens Engine <span class="badge">PRO</span></span>
+          <div class="header-left">
+            <span class="devlens-title">DevLens Engine <span class="badge">PRO</span></span>
+            <a href="https://github.com/Arsh-pixel-cmd/DevLens" target="_blank" class="github-star-link">⭐ Star</a>
+          </div>
           <div class="actions-right">
              <button class="devlens-btn-icon" id="debug-btn" title="Toggle Debug Mode">🐞</button>
              <button class="devlens-btn-icon" id="min-btn">_</button>
              <button class="devlens-btn-icon" id="close-btn">✕</button>
           </div>
         </div>
+
+        <div class="minimized-shortcut">D</div>
 
         <div class="devlens-tabs">
           <div class="devlens-tab active" data-tab="intelligence">Insights</div>
@@ -371,38 +376,100 @@ export class DevLensUI {
      explainBtn.disabled = true;
 
      try {
+        // Ensure exportIR is primed for this node (Mandatory Fix for "IR not primed" error)
+        if (!exportIR.has(nodeId)) {
+           buildExportIR([nodeId]);
+        }
+
         const node = exportIR.get(nodeId);
-        if (!node) throw new Error("IR not primed. Please select and compile first.");
+        if (!node) throw new Error("Failed to extract element metadata.");
 
         const stored = await new Promise(r => chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model'], r));
         const refiner = new AIRefiner(stored.ai_key, stored.ai_url, stored.ai_model);
         
-        // Pruned Context Prompt (MANDATORY Fix)
-        const prompt = `Explain this UI element's layout and logic in 2 sentences. 
-        Tag: ${node.tag}, Layout: ${JSON.stringify(node.layout)}, Semantics: ${node.semantics}.
-        Why was ${node.layout.display} used here?`;
+        const prompt = `Explain this UI element's layout and logic in 3 sentences. 
+        Focus on structural purpose and performance.
+        Tag: ${node.tag}, Layout: ${JSON.stringify(node.layout)}, Semantics: ${node.semantics}.`;
 
-        const response = await refiner.refine(prompt, exportIR, 1.0); // Abuse refiner for explanation
+        const response = await refiner.generalQuery(prompt);
         
-        // Show as a custom overlay or in the data block
-        const dataBindingSection = panel.querySelector('.prop-section:last-of-type');
-        const explainBlock = document.createElement('div');
-        explainBlock.style.marginTop = '12px';
-        explainBlock.style.padding = '10px';
-        explainBlock.style.background = 'rgba(166, 226, 46, 0.05)';
-        explainBlock.style.border = '1px solid rgba(166, 226, 46, 0.2)';
-        explainBlock.style.borderRadius = '6px';
-        explainBlock.innerHTML = `<small style="color:#a6e22e; display:block; margin-bottom:4px;">AI ELMENT EXPLAIN</small>
-                                   <div style="font-size:11px; color:#ddd; line-height:1.4;">${response.code || response.explanation || response.error}</div>`;
-        
-        panel.appendChild(explainBlock);
+        if (!response.success) throw new Error(response.error || "AI Query Failed");
+
+        const content = response.explanation || "No explanation generated.";
+        this.showAIWindow(`Insight: <${node.tag} />`, content);
 
      } catch (err) {
-        this.showToast("AI Explanation failed.");
+        console.error("[DevLens] AI Explain Error:", err);
+        this.showToast("AI Explanation failed: " + err.message);
      } finally {
         explainBtn.textContent = "🧠 AI Explain";
         explainBtn.disabled = false;
      }
+  }
+
+  showAIWindow(title, content) {
+    // Remove existing window if any
+    const existing = document.querySelector('.devlens-insight-window');
+    if (existing) existing.remove();
+
+    const win = document.createElement('div');
+    win.className = 'devlens-insight-window';
+    win.innerHTML = `
+      <div class="insight-header">
+        <div class="insight-title">✨ ${title}</div>
+        <div class="insight-controls">
+           <button class="insight-btn" id="insight-min" title="Minimize">_</button>
+           <button class="insight-btn" id="insight-close" title="Close">✕</button>
+        </div>
+      </div>
+      <div class="insight-content">
+        ${content}
+      </div>
+    `;
+
+    const hostRoot = this.root.getRootNode();
+    if (hostRoot) {
+       hostRoot.appendChild(win);
+    } else {
+       document.body.appendChild(win); // Fallback
+    }
+
+    // Controls
+    win.querySelector('#insight-close').onclick = () => win.remove();
+    win.querySelector('#insight-min').onclick = () => win.classList.toggle('minimized');
+
+    // Drag Logic
+    this.makeDraggable(win, win.querySelector('.insight-header'));
+  }
+
+  makeDraggable(el, handle) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    handle.onmousedown = dragMouseDown;
+
+    function dragMouseDown(e) {
+      e.preventDefault();
+      pos3 = e.clientX;
+      pos4 = e.clientY;
+      document.onmouseup = closeDragElement;
+      document.onmousemove = elementDrag;
+    }
+
+    function elementDrag(e) {
+      e.preventDefault();
+      pos1 = pos3 - e.clientX;
+      pos2 = pos4 - e.clientY;
+      pos3 = e.clientX;
+      pos4 = e.clientY;
+      el.style.top = (el.offsetTop - pos2) + "px";
+      el.style.left = (el.offsetLeft - pos1) + "px";
+      el.style.bottom = 'auto'; // Break initial bottom-right binds if any
+      el.style.right = 'auto';
+    }
+
+    function closeDragElement() {
+      document.onmouseup = null;
+      document.onmousemove = null;
+    }
   }
 
   renderPropertiesSidebar() {
@@ -594,19 +661,32 @@ export class DevLensUI {
       this.root.dispatchEvent(new CustomEvent('close-devlens', { bubbles: true }));
     });
 
+    // Minimize
+    this.root.querySelector('#min-btn').addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('min-devlens', { bubbles: true }));
+    });
+    
+    // Minimized Shortcut click to restore
+    this.root.querySelector('.minimized-shortcut').addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('min-devlens', { bubbles: true }));
+    });
+
     // Debug Mode Toggle
     const debugBtn = this.root.querySelector('#debug-btn');
     if (debugBtn) {
-       debugBtn.onclick = () => {
+       debugBtn.addEventListener('click', () => {
           store.debug = !store.debug;
-          debugBtn.style.color = store.debug ? '#a6e22e' : '';
+          debugBtn.style.opacity = store.debug ? '1' : '0.5';
+          debugBtn.style.filter = store.debug ? 'drop-shadow(0 0 5px #a6e22e)' : '';
           this.showToast(`Debug Mode: ${store.debug ? 'ON' : 'OFF'}`);
-          console.log("[DevLens Debug State]", { 
-            nodes: store.nodes, 
-            mappings: store.mappings, 
-            lastUpdate: store.lastUpdateTimestamp 
-          });
-       };
+          if (store.debug) {
+            console.log("[DevLens Debug State]", { 
+              nodes: store.nodes, 
+              mappings: store.mappings, 
+              lastUpdate: store.lastUpdateTimestamp 
+            });
+          }
+       });
     }
 
     // Universal Key Management
@@ -739,7 +819,7 @@ export class DevLensUI {
         // 1. Extract className
         const classMatch = /className="([^"]*)"/.exec(propsStr);
         if (classMatch) {
-          node.element.className = classMatch[1];
+          node.element.setAttribute('class', classMatch[1]);
         }
 
         // 2. Extract style
@@ -793,7 +873,7 @@ export class DevLensUI {
 
         // If it's a className update
         if (payload.property === 'className' || payload.classes) {
-          const newClasses = payload.classes || node.element.className;
+          const newClasses = payload.classes || node.element.getAttribute('class') || '';
           if (tagContent.includes('className="')) {
             tagContent = tagContent.replace(/className="[^"]*"/, `className="${newClasses}"`);
           } else {

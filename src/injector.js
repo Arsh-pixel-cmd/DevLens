@@ -35,8 +35,15 @@
         // Create Host
         shadowHost = document.createElement('div');
         shadowHost.id = 'devlens-host';
-        shadowHost.style.top = '20px';
-        shadowHost.style.right = '20px';
+        Object.assign(shadowHost.style, {
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: '2147483647',
+            width: 'auto',
+            height: 'auto',
+            pointerEvents: 'none' // Allow clicks to pass through host padding
+        });
 
         shadowRoot = shadowHost.attachShadow({ mode: 'open' });
 
@@ -74,6 +81,11 @@
             setupDrag(shadowHost, container);
 
             container.addEventListener('close-devlens', closePanel);
+            container.addEventListener('min-devlens', () => {
+                shadowHost.classList.toggle('minimized');
+            });
+
+            container.style.pointerEvents = 'auto'; // Ensure container captures clicks
 
             // Listen for API messages from Main World
             window.addEventListener('message', (e) => {
@@ -118,13 +130,17 @@
             initialLeft = rect.left;
             initialTop = rect.top;
 
+            // Clear right/bottom immediately to allow top/left to take precedence
+            host.style.right = 'auto';
+            host.style.bottom = 'auto';
+            host.style.left = `${initialLeft}px`;
+            host.style.top = `${initialTop}px`;
+            host.style.pointerEvents = 'auto'; // Capture all clicks while dragging
+
             e.preventDefault();
 
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
-
-            container.style.cursor = 'grabbing';
-            header.style.cursor = 'grabbing';
         });
 
         const onMouseMove = (e) => {

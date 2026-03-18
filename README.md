@@ -1,80 +1,74 @@
 # 🔮 DevLens Ultra
 
 **The Ultimate Browser Extension for Frontend Engineers.**  
-*Reverse-engineer design systems, extract clean React code, and debut production animations—all in one click.*
+*Reverse-engineer design systems, extract clean React code, and dissect production components—all in one click.*
 
-![DevLens Hero](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white) 
+[![GitHub Star](https://img.shields.io/github/stars/Arsh-pixel-cmd/DevLens?style=social)](https://github.com/Arsh-pixel-cmd/DevLens)
+![Chrome Extension](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white) 
 ![React](https://img.shields.io/badge/React-Extraction-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-![Tailwind](https://img.shields.io/badge/Tailwind-Mapper-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
 
 ---
 
 ## 🚀 Overview
 
-**DevLens Ultra** is not just another color picker. It's a professional-grade engineering tool built to dissect modern web applications. It uses advanced **DOM Analysis**, **Network Sniffing**, and **Heuristic Scanning** to reveal the DNA of any website.
+**DevLens Ultra** is a professional-grade engineering tool built to dissect modern web applications. It uses advanced **DOM Analysis**, **System 4 IR Scanning**, and **Heuristic Pattern Detection** to reveal the DNA of any website.
 
-Built with performance in mind, it operates inside a **Shadow DOM** to ensure zero CSS bleed, uses `requestIdleCallback` for non-blocking analysis, and leverages **Manifest V3** for security and longevity.
+Built with performance in mind, it operates inside a **Shadow DOM** to ensure zero CSS bleed and leverages **Manifest V3 Service Workers** for non-blocking network analysis.
 
 ## ✨ Advanced Features
 
-### 1. ⚛️ Component Ripper (The Killer Feature)
-Stop guessing how a UI component was built.
-*   **Inspector Mode**: Hover & click any element on the page.
-*   **Code Generation**: Instantly extracts a clean **React Component**.
-*   **Tailwind Mapper**: Automatically converts computed styles (px, rgb) into nearest **Tailwind CSS classes** (e.g., `p-4`, `bg-blue-500`, `rounded-lg`).
-*   **Smart Cleaning**: Filters out 300+ browser default styles to give you only the code that matters.
+### ⚛️ 1. Component Ripper (System 4 Engine)
+- **Zero-Noise Codegen**: Extracts clean, production-ready React components.
+- **Tailwind Mapper**: Automatically converts computed styles into the nearest Tailwind CSS classes.
+- **Abstract Mode**: Uses AI to refactor raw DOM into logical, reusable sub-components.
 
-### 2. 🕵️‍♂️ Tech & API Sniffer
-Go beyond the frontend. DevLens monitors network traffic (XHR/Fetch) in real-time.
-*   **Stack Detection**: Identifies frameworks (Next.js, Vue, Nuxt) and libraries (GSAP, Framer Motion).
-*   **Backend Recon**: Detects API signatures from major providers like **Supabase**, **Firebase**, **Stripe**, **Algolia**, and **Contentful**.
+### 🧠 2. AI Insight Fusion
+- **Universal LLM Support**: Connect to OpenAI, Groq, Ollama, or OpenRouter.
+- **AI Explain**: Highlight any element to get a 3-sentence technical breakdown of its layout, logic, and purpose.
+- **Auto-Correction**: AI handles malformed JSON and optimizes JSX structure on the fly.
 
-### 3. ⏳ Animation Time-Machine
-Debug complex micro-interactions with precision.
-*   **Time Warp**: Global slider to slow down the entire website to **0.1x speed**.
-*   **Bezier Thief**: Extracts and visualizes distinct `cubic-bezier` curves used in CSS transitions.
+### 🕵️‍♂️ 3. Framework & API Sniffer
+- **Stack Detection**: Identifies frameworks (Next.js, React, Vue) and libraries.
+- **Data Hooking**: Directly reads framework state like `__NEXT_DATA__` or React Fiber props.
 
-### 4. 🎨 Intelligent Design System
-*   **Smart Palette**: Uses HSL clustering to group colors into **Primary**, **Secondary**, and **Grays** automatically.
-*   **Typography Scanner**: Captures font stacks, weights, and computed sizes.
-
-### 5. 👻 Pixel-Perfect Ops
-*   **Ghost Overlay**: Upload a Figma export/mockup.
-*   **Visual Diff**: Overlay it on the live site with adaptable opacity to verify implementation accuracy.
+### 🎨 4. Modern Figma-Style UI
+- **Draggable & Minimizable**: Floating sidebar that can be dragged anywhere or minimized to a sleek "D" icon.
+- **Glassmorphism Design**: High-end UI that stays out of your way.
 
 ---
 
-## 🛠 Engineering Deep Dive
+## 🛠 Architecture & Flow
 
-For the recruiters and engineers curious about the implementation:
+For deep-dive exploration, the codebase follow a "Triple-Layer" architecture:
 
-*   **Manifest V3 Architecture**: Built on the latest Web Extension standard using Service Workers and strict CSP.
-*   **Shadow DOM Isolation**: The entire UI lives inside `attachShadow({mode: 'open'})`. The extension's styles **never** conflict with the host site.
-*   **Main World Injection**: Bypasses extension isolation sandbox to read global window variables (`window.React`, `window.__NEXT_DATA__`) and proxy network requests.
-*   **Performance First**: Heavy scanning tasks are chunked and scheduled during browser idle time to maintain 60FPS scrolling.
-*   **Security**: HTML sanitization and safe DOM APIs prevent XSS when rendering scanned content.
+1.  **The Shadow Host (Injector)**: Encapsulates the UI in a Shadow DOM. Bypasses site-wide CSP to load styles and scripts safely.
+2.  **The Scanning Worker**: Offloads heavy DOM-to-IR calculations to a background thread to prevent UI jank.
+3.  **The Service Worker (Background)**: Handles secure network requests, AI streaming, and long-running job management.
 
 ---
 
-## 📦 Installation
+## 📦 Getting Started
 
-1.  Clone this repository.
-2.  Open Chrome and navigate to `chrome://extensions`.
-3.  Enable **Developer Mode** (top right toggle).
-4.  Click **Load unpacked**.
-5.  Select the **DevLens** folder.
-6.  Pin the extension and visit any website!
-
----
+1.  **Clone the Repo**: `git clone https://github.com/Arsh-pixel-cmd/DevLens.git`
+2.  **Load in Chrome**: 
+    - Go to `chrome://extensions`.
+    - Enable **Developer Mode**.
+    - Click **Load unpacked** and select the `src` folder.
+3.  **Configure AI**:
+    - Open the extension → Go to **Codegen** tab.
+    - Enter your API Key and Base URL.
+    - Click **Save Configuration**.
 
 ## 🎮 How to Use
 
-1.  **Zero-Config Scan**: Just click the extension icon. The page will auto-scroll to wake up lazy-loaded assets.
-2.  **Rip a Component**: Go to the **Tools** tab → Click **Inspect Component** → Click any UI element. Copy the code from the **Export** tab.
-3.  **Debug Motion**: Go to **Tools** → Drag the **Time Warp** slider.
+- **Inspect**: Click **Select Element** and click any part of a website.
+- **Insights**: Switch to the **Insights** tab to see React Fiber data or click **AI Explain**.
+- **Generate**: Go to **Codegen** → **Compile Selection**. Copy the JSX or refine it via the code editor.
+- **Minimize**: Use the `-` icon to shrink DevLens into a floating shortcut.
 
 ---
 
 <div align="center">
+  <p><b>Support the project! ⭐ Star the repo on <a href="https://github.com/Arsh-pixel-cmd/DevLens">GitHub</a></b></p>
   <i>Built with ❤️ by Arsh. Defining the future of Developer Tooling.</i>
 </div>

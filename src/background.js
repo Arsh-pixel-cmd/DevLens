@@ -38,6 +38,12 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'AI_REFINER_FETCH') {
     (async () => {
+      // Use an AbortController to implement a timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+         controller.abort();
+      }, 15000); // 15 second timeout
+
       try {
         const res = await fetch(message.baseUrl, {
           method: "POST",
@@ -49,12 +55,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
              model: message.modelId,
              temperature: 0.1,
              messages: [{ role: "user", content: message.prompt }]
-          })
+          }),
+          signal: controller.signal
         });
-        const data = await res.json();
+        
+        clearTimeout(timeoutId);
+        
+        const text = await res.text();
+        let data;
+        try {
+           data = JSON.parse(text);
+        } catch (e) {
+           throw new Error(`Invalid JSON response from server (Status ${res.status}): ${text.slice(0, 100)}...`);
+        }
+        
         sendResponse({ success: true, data });
       } catch (err) {
-        sendResponse({ success: false, error: err.message });
+        clearTimeout(timeoutId);
+        const errorMsg = err.name === 'AbortError' ? "Request timed out after 15s" : err.message;
+        sendResponse({ success: false, error: errorMsg });
       }
     })();
     return true; // Keep message channel open for async response

@@ -1,6 +1,17 @@
 /* src/styles.css */
 
 /* Core Container (Shadow DOM Encapsulated) */
+:host {
+    display: block;
+    transition: opacity 0.3s ease;
+}
+
+:host(:not(.visible)) {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(20px);
+}
+
 .devlens-container {
   position: fixed;
   top: 10px;
@@ -30,6 +41,29 @@
   font-weight: 600;
   color: #fff;
   user-select: none;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.github-star-link {
+  font-size: 10px;
+  color: #666;
+  text-decoration: none;
+  background: rgba(255,255,255,0.05);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  transition: all 0.2s;
+}
+
+.github-star-link:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+  border-color: #61dafb;
 }
 
 .devlens-title .badge {
@@ -339,4 +373,145 @@
 .animation-item:hover {
     background: rgba(255, 255, 255, 0.05) !important;
     border-color: rgba(97, 218, 251, 0.2) !important;
+}
+
+/* --- AI Insight Floating Window --- */
+.devlens-insight-window {
+    position: fixed;
+    top: 50px;
+    left: 50px;
+    width: 320px;
+    background: rgba(24, 24, 26, 0.85);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+    z-index: 2147483647;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+    animation: insight-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes insight-pop {
+    from { opacity: 0; transform: scale(0.9) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.insight-header {
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: grab;
+    user-select: none;
+}
+
+.insight-header:active {
+    cursor: grabbing;
+}
+
+.insight-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #a6e22e;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.insight-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.insight-btn {
+    background: none;
+    border: none;
+    color: #666;
+    padding: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    transition: color 0.2s;
+}
+
+.insight-btn:hover {
+    color: #fff;
+}
+
+.insight-content {
+    padding: 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #ddd;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.insight-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.insight-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+.devlens-insight-window.minimized {
+    height: 40px !important;
+    width: 200px !important;
+}
+
+.devlens-insight-window.minimized .insight-content {
+    display: none;
+}
+
+/* --- Minimized State for Extension --- */
+.minimized-shortcut {
+    display: none;
+    width: 48px;
+    height: 48px;
+    background: #61dafb;
+    color: #000;
+    font-weight: 800;
+    font-size: 20px;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(97, 218, 251, 0.4);
+    transition: transform 0.2s;
+    user-select: none;
+}
+
+.minimized-shortcut:hover {
+    transform: scale(1.1);
+}
+
+:host(.minimized) .devlens-container {
+    background: transparent;
+    box-shadow: none;
+    border: none;
+    width: auto;
+    height: auto;
+    pointer-events: none;
+}
+
+:host(.minimized) .devlens-header,
+:host(.minimized) .devlens-tabs,
+:host(.minimized) .devlens-content {
+    display: none;
+}
+
+:host(.minimized) .minimized-shortcut {
+    display: flex;
+    pointer-events: auto;
 }

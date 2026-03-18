@@ -32,9 +32,11 @@
                 "src/componentDetector.js",
                 "src/codegen/reactGenerator.js",
                 "src/codegen/tailwindMapper.js",
+                "src/codegen/aiRefiner.js",
                 "src/mainWorld.js",
                 "src/dataInspector.js",
-                "src/layoutInspector.js"
+                "src/layoutInspector.js",
+                "src/propExtractor.js"
             ],
             "matches": [
                 "<all_urls>"

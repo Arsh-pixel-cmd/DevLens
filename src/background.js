@@ -34,3 +34,29 @@ chrome.action.onClicked.addListener(async (tab) => {
     console.error('DevLens Activation Error:', err);
   }
 });
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'AI_REFINER_FETCH') {
+    (async () => {
+      try {
+        const res = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { 
+             "Content-Type": "application/json", 
+             "Authorization": `Bearer ${message.apiKey}` 
+          },
+          body: JSON.stringify({
+             model: "gpt-4-turbo-preview",
+             temperature: 0.1,
+             messages: [{ role: "user", content: message.prompt }]
+          })
+        });
+        const data = await res.json();
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true; // Keep message channel open for async response
+  }
+});

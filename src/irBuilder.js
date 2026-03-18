@@ -14,11 +14,14 @@ export function buildLiveIR(nodeId) {
 
   const computed = getComputedStyle(node.element);
   
+  const rect = node.element.getBoundingClientRect();
+
   const ir = {
     id: nodeId,
     tag: node.element.tagName.toLowerCase(),
     classList: [...node.element.classList],
     styles: { ...node.overrides },
+    
     layout: {
       display: computed.display,
       flexDirection: computed.flexDirection,
@@ -26,22 +29,31 @@ export function buildLiveIR(nodeId) {
       alignItems: computed.alignItems,
       gap: computed.gap
     },
+    
     boxModel: {
       margin: computed.margin,
-      padding: computed.padding
+      padding: computed.padding,
+      width: rect.width,
+      height: rect.height
     },
-    children: node.childrenIds || [],
-    parentId: node.parentId,
-    semanticRole: inferSemanticRole(node.element),
-    text: Array.from(node.element.childNodes).filter(n => n.nodeType === Node.TEXT_NODE).map(n => n.textContent.trim()).filter(Boolean).join(' '),
-    attributes: {
+    
+    content: {
+      text: Array.from(node.element.childNodes).filter(n => n.nodeType === Node.TEXT_NODE).map(n => n.textContent.trim()).filter(Boolean).join(' '),
       src: node.element.getAttribute('src'),
       href: node.element.getAttribute('href')
-    }
+    },
+    
+    children: node.childrenIds || [],
+    parentId: node.parentId,
+    depth: getDepth(node.element),
+    semantics: inferSemanticRole(node.element)
   };
   
-  liveIR.set(nodeId, ir);
-  return ir;
+  // MERGE DIRECTLY INTO STORE NOde TO PRESERVE NODE CLONE CAPABILITIES FOR MODE 1 RAW
+  Object.assign(node, ir);
+  
+  liveIR.set(nodeId, node);
+  return node;
 }
 
 /**
@@ -90,7 +102,7 @@ function deepRegisterAndBuild(nodeId) {
 
 function getDepth(el) {
    let d = 0; let c = el;
-   while(c.parentElement) { d++; c = c.parentElement; }
+   while(c && c.parentElement) { d++; c = c.parentElement; }
    return d;
 }
 

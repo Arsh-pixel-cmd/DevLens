@@ -6,6 +6,9 @@ import { ComponentRipper } from './ripper.js';
 import { ComponentDetector } from './componentDetector.js';
 import { detectLayoutIntent } from './layoutInspector.js';
 import { ReactGenerator } from './codegen/reactGenerator.js';
+import { AIRefiner } from './codegen/aiRefiner.js';
+import { PropExtractor } from './propExtractor.js';
+import { buildExportIR, exportIR } from './irBuilder.js';
 import { copyToClipboard } from './clipboard.js';
 
 function debounce(func, wait) {
@@ -63,12 +66,34 @@ export class DevLensUI {
           </div>
           
            <div id="panel-export" class="devlens-panel">
-             <div class="section-title">Generative Output</div>
-             <button class="btn-secondary" id="compile-code">Compile Selected to React</button>
-             <textarea class="code-export" readonly placeholder="JSX will appear here..."></textarea>
-             <div style="display:flex; gap:8px; margin-top:8px;">
-               <button class="btn-primary" id="copy-code">Copy JSX</button>
-               <span class="confidence-badge" id="ai-confidence"></span>
+             <div class="props-header" style="margin-bottom:16px;">
+                 <span class="selection-count">Generation Strategy</span>
+             </div>
+             
+             <div style="margin-bottom:20px;">
+               <label class="section-title" style="display:block; margin-bottom:8px;">Compiler Mode</label>
+               <select id="codegen-mode" class="prop-input" style="width:100%; padding:8px;">
+                  <option value="raw">Mode 1: Raw Tailwind DOM</option>
+                  <option value="abstract" selected>Mode 2: Abstract JSX Components</option>
+               </select>
+             </div>
+             
+             <div style="margin-bottom:24px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
+                <label class="section-title" style="display:block; margin-bottom:6px; color:#a6e22e;">✨ AI Refinement Firewall</label>
+                <div style="font-size:10px; color:#aaa; margin-bottom:12px; line-height:1.4;">Insert an OpenAI Key to securely unlock contextual naming and logic refinement. Keys are vaulted strictly natively.</div>
+                <div style="display:flex; gap:8px;">
+                   <input type="password" id="ai-key" class="prop-input" placeholder="sk-proj-..." style="flex:1; padding:8px;">
+                   <button class="btn-primary" id="save-key" style="width:auto; padding:8px 16px;">Vault</button>
+                </div>
+             </div>
+
+             <button class="btn-secondary" id="compile-code" style="width:100%; padding:10px; margin-bottom:16px; font-size:13px; font-weight:600;">Compile Selection</button>
+             
+             <textarea class="code-export" readonly placeholder="Select an element and click Compile to see JSX..."></textarea>
+             
+             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+               <span class="confidence-badge" id="ai-confidence" style="flex:1; background:rgba(0,0,0,0.3); justify-content:center; margin-right:8px; border:none; padding:8px; color:#666;">Waiting...</span>
+               <button class="btn-primary" id="copy-code" style="width:auto; padding:8px 24px;">Copy JSX</button>
              </div>
           </div>
         </div>
@@ -149,49 +174,52 @@ export class DevLensUI {
      const layout = detectLayoutIntent(node);
 
      // 3. Data Awareness Visualization
-     let dataBlock = `<div style="color:#888; font-size:11px;">No Framework Context Found</div>`;
+     let dataBlock = `<div style="color:#888; font-size:12px; padding:12px; border:1px dashed rgba(255,255,255,0.1); border-radius:6px; text-align:center;">No Framework Context Found</div>`;
      if (dataResult.fiber && !dataResult.fiber.error && dataResult.fiber.componentName) {
          dataBlock = `
-           <div style="background:rgba(97,218,251,0.1); border:1px solid #61dafb; padding:8px; border-radius:4px;">
-              <strong style="color:#61dafb;">React Fiber ⚛️</strong><br>
-              <span style="font-size:11px;">Component: <code>&lt;${dataResult.fiber.componentName} /&gt;</code></span>
-              <div style="margin-top:6px; max-height:100px; overflow:auto;">
-                 <pre style="font-size:9px; color:#ccc; margin:0;">${JSON.stringify(dataResult.fiber.props || {}, null, 2)}</pre>
+           <div style="background:rgba(97,218,251,0.05); border:1px solid rgba(97,218,251,0.2); padding:12px; border-radius:6px;">
+              <strong style="color:#61dafb; display:block; margin-bottom:6px;">React Fiber ⚛️</strong>
+              <span style="font-size:12px; color:#ddd;">Component: <code style="color:#fff;">&lt;${dataResult.fiber.componentName} /&gt;</code></span>
+              <div style="margin-top:10px; padding:8px; background:rgba(0,0,0,0.3); border-radius:4px; max-height:120px; overflow:auto;">
+                 <pre style="font-size:10px; color:#a6e22e; margin:0;">${JSON.stringify(dataResult.fiber.props || {}, null, 2)}</pre>
               </div>
            </div>
          `;
      } else if (dataResult.nextData) {
          dataBlock = `
-           <div style="background:rgba(255,255,255,0.1); border:1px solid #aaa; padding:8px; border-radius:4px;">
-              <strong>Next.js __NEXT_DATA__ 🚀</strong><br>
-              <code style="font-size:10px; color:#a6e22e;">${dataResult.nextData.value}</code><br>
-              <div style="font-size:9px; color:#888; margin-top:4px;">Path: ${dataResult.nextData.path}</div>
-              <div style="font-size:9px; color:#888;">Confidence: ${(dataResult.nextData.confidence * 100).toFixed(0)}%</div>
+           <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); padding:12px; border-radius:6px;">
+              <strong style="display:block; margin-bottom:6px;">Next.js __NEXT_DATA__ 🚀</strong>
+              <code style="font-size:11px; color:#a6e22e; display:block; margin-bottom:8px;">${dataResult.nextData.value}</code>
+              <div style="font-size:10px; color:#aaa; margin-bottom:4px;">Path: ${dataResult.nextData.path}</div>
+              <div style="font-size:10px; color:#aaa;">Confidence: <span style="color:#61dafb;">${(dataResult.nextData.confidence * 100).toFixed(0)}%</span></div>
            </div>
          `;
      }
 
      panel.innerHTML = `
-        <div class="props-header" style="margin-bottom:12px;">
+        <div class="props-header" style="margin-bottom:16px;">
            <span class="selection-count">Context-Aware Fusion</span>
         </div>
         
-        <div class="prop-section">
-          <div class="section-title">Component Intelligence</div>
-          <div style="font-size:11px; padding:8px; background:rgba(0,0,0,0.2); border-radius:4px;">${reuseText}</div>
+        <div class="prop-section" style="margin-bottom:24px;">
+          <div class="section-title" style="margin-bottom:10px;">Component Intelligence</div>
+          <div style="font-size:12px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">${reuseText}</div>
         </div>
 
-        <div class="prop-section">
-          <div class="section-title">Layout Telemetry <span style="float:right; color:#888;">Conf: ${(layout.confidence * 100).toFixed(0)}%</span></div>
-          <div style="font-size:11px; padding:8px; background:rgba(0,0,0,0.2); border-radius:4px; line-height:1.4;">
-            <strong>System:</strong> ${layout.type.toUpperCase()}<br>
-            <strong>Logic:</strong> ${layout.alignment || 'Static Flow'}<br>
-            <strong style="color:#ff79c6;">Scale:</strong> ${layout.spacingScale}
+        <div class="prop-section" style="margin-bottom:24px;">
+          <div class="section-title" style="margin-bottom:10px; display:flex; justify-content:space-between;">
+             <span>Layout Telemetry</span>
+             <span style="color:#61dafb;">Conf: ${(layout.confidence * 100).toFixed(0)}%</span>
+          </div>
+          <div style="font-size:12px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; line-height:1.6;">
+            <div style="display:flex; justify-content:space-between;"><span style="color:#888;">System</span> <span style="font-weight:600;">${layout.type.toUpperCase()}</span></div>
+            <div style="display:flex; justify-content:space-between; margin-top:4px;"><span style="color:#888;">Logic</span> <span>${layout.alignment || 'Static Flow'}</span></div>
+            <div style="display:flex; justify-content:space-between; margin-top:4px;"><span style="color:#888;">Scale</span> <span style="color:#ff79c6;">${layout.spacingScale}</span></div>
           </div>
         </div>
 
         <div class="prop-section">
-          <div class="section-title">Data Binding Layer</div>
+          <div class="section-title" style="margin-bottom:10px;">Data Binding Layer</div>
           ${dataBlock}
         </div>
      `;
@@ -243,7 +271,7 @@ export class DevLensUI {
       </div>
 
       <div class="prop-section">
-        <div class="section-title">Spacing</div>
+        <div class="section-title" style="margin-bottom:12px;">Spacing</div>
         <div class="prop-grid">
           <div><label>Padding</label><input type="text" data-prop="padding" class="prop-input" value="${formatMix(getVal('padding'))}"></div>
           <div><label>Margin</label><input type="text" data-prop="margin" class="prop-input" value="${formatMix(getVal('margin'))}"></div>
@@ -253,7 +281,7 @@ export class DevLensUI {
       </div>
 
       <div class="prop-section">
-        <div class="section-title">Colors</div>
+        <div class="section-title" style="margin-bottom:12px;">Colors</div>
         <div class="prop-row">
           <label>Background</label>
           <div class="color-picker-wrap">
@@ -330,24 +358,71 @@ export class DevLensUI {
       this.root.dispatchEvent(new CustomEvent('close-devlens', { bubbles: true }));
     });
 
+    // Key Management
+    const saveKeyBtn = this.root.querySelector('#save-key');
+    const inputKey = this.root.querySelector('#ai-key');
+    if (saveKeyBtn) {
+       chrome.storage.local.get(['openai_key'], (res) => {
+          if (res.openai_key) inputKey.value = "********";
+       });
+       saveKeyBtn.addEventListener('click', () => {
+          if (inputKey.value && inputKey.value !== "********") {
+             chrome.storage.local.set({ openai_key: inputKey.value });
+             this.showToast('API Key Secured Natively');
+             inputKey.value = "********";
+          }
+       });
+    }
+
     // Codegen Compilation Hook
     const compileBtn = this.root.querySelector('#compile-code');
     if (compileBtn) {
-      compileBtn.addEventListener('click', () => {
+      compileBtn.addEventListener('click', async () => {
          if (store.selection.length === 0) {
            this.showToast('Please select an element first.');
            return;
          }
 
-         const generator = new ReactGenerator(null, null);
-         const code = generator.generate(store.primary);
+         compileBtn.textContent = 'Compiling AST...';
+         const mode = this.root.querySelector('#codegen-mode').value;
+
+         // Phase 1: Natively generate the pure NodeIR mapped Tree
+         const rootNodeId = store.selection[0];
+         buildExportIR([rootNodeId]); 
+         
+         // Phase 2: Execute Strict Prop Extraction over the AST
+         const extractor = new PropExtractor(exportIR);
+         extractor.execute();
+         
+         // Phase 3: Enforce Component Extraction (0.85% Similarities)
+         const componentDetector = new ComponentDetector(exportIR);
+         componentDetector.detectPatterns();
+
+         // Phase 4: Deterministic Fallback Generation
+         const generator = new ReactGenerator(exportIR, componentDetector.components);
+         let code = generator.generate(rootNodeId, mode);
+         const score = generator.getVerificationScore();
+
+         // Phase 5: Gated AI Validation Path
+         let aiMode = "Deterministic";
+         if (mode === "abstract") {
+             compileBtn.textContent = 'Refining via AI...';
+             const stored = await new Promise(r => chrome.storage.local.get(['openai_key'], r));
+             if (stored.openai_key) {
+                const refiner = new AIRefiner(stored.openai_key);
+                const aiResult = await refiner.refine(code, exportIR, score);
+                code = aiResult.code;
+                aiMode = aiResult.mode;
+             }
+         }
 
          this.root.querySelector('.code-export').value = code;
          
-         const score = generator.getVerificationScore();
          const confBadge = this.root.querySelector('#ai-confidence');
-         confBadge.textContent = 'Confidence: ' + score;
+         confBadge.innerHTML = `Conf: ${score} <span style="color:#aaa; font-size:9px;">[${aiMode}]</span>`;
          confBadge.style.color = score > 0.8 ? '#a6e22e' : '#ff5555';
+         
+         compileBtn.textContent = 'Compile Selection';
       });
     }
 

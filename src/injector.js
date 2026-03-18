@@ -55,10 +55,9 @@
 
         // Import Modules
         try {
-            const [{ DevLensUI }, { DevLensScanner }, { ComponentRipper }] = await Promise.all([
+            const [{ DevLensUI }, { DevLensScanner }] = await Promise.all([
                 import(chrome.runtime.getURL('src/ui.js')),
-                import(chrome.runtime.getURL('src/scanner.js')),
-                import(chrome.runtime.getURL('src/ripper.js'))
+                import(chrome.runtime.getURL('src/scanner.js'))
             ]);
 
             // Init Scanner
@@ -66,10 +65,6 @@
 
             // Init UI
             uiInstance = new DevLensUI(container, techData, scannerInstance);
-
-            // Init Ripper
-            const ripper = new ComponentRipper(uiInstance);
-            uiInstance.setRipper(ripper);
 
             uiInstance.render();
 

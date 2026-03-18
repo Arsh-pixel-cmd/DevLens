@@ -1,47 +1,72 @@
 // src/ui.js
+import { store } from './store.js';
+import { eventBus } from './eventBus.js';
+import { updateStyle, batchUpdateStyles, getMultiStyle, revertNode } from './styleEngine.js';
+import { buildExportIR, exportIR } from './irBuilder.js';
+import { ComponentRipper } from './ripper.js';
+import { ComponentDetector } from './componentDetector.js';
+import { ReactGenerator } from './codegen/reactGenerator.js';
 import { copyToClipboard } from './clipboard.js';
+
+function debounce(func, wait) {
+  let timeout;
+  return function(...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
 
 export class DevLensUI {
   constructor(root, techData, scanner) {
     this.root = root;
     this.techData = techData;
     this.scanner = scanner;
-    this.designData = { colors: [], fonts: [] };
-    this.activeTab = 'tech';
+    
+    // Instantiate our new State-Driven Ripper
+    this.ripper = new ComponentRipper(this);
+
+    // Debounce UI inputs sending requests to the core engine (RAF)
+    this.debouncedUpdate = debounce(this.handleStyleChange.bind(this), 16);
   }
 
   render() {
     this.root.innerHTML = `
-      <div class="devlens-container">
+      <div class="devlens-container figma-sidebar">
         <div class="devlens-header">
-          <span class="devlens-title">DevLens Ultra</span>
+          <span class="devlens-title">DevLens Engine <span class="badge">PRO</span></span>
           <div class="actions-right">
              <button class="devlens-btn-icon" id="min-btn">_</button>
              <button class="devlens-btn-icon" id="close-btn">✕</button>
           </div>
         </div>
 
-        <div class="scan-progress"><div class="scan-bar"></div></div>
-        
         <div class="devlens-tabs">
-          <div class="devlens-tab active" data-tab="tech">Tech</div>
-          <div class="devlens-tab" data-tab="design">Design</div>
-          <div class="devlens-tab" data-tab="tools">Tools</div>
-          <div class="devlens-tab" data-tab="export">Export</div>
+          <div class="devlens-tab" data-tab="tech">Tech</div>
+          <div class="devlens-tab active" data-tab="design">Properties</div>
+          <div class="devlens-tab" data-tab="export">Codegen</div>
         </div>
 
         <div class="devlens-content">
-          <div id="panel-tech" class="devlens-panel active">
+          <div id="panel-tech" class="devlens-panel">
              ${this.renderTechTab()}
           </div>
-          <div id="panel-design" class="devlens-panel">
-             ${this.renderDesignTab()}
+          
+          <div id="panel-design" class="devlens-panel active">
+             <!-- Live Style Panel Injected Here -->
+             <div class="empty-selection-state">
+                <button class="btn-primary" id="toggle-ripper">Select Element</button>
+                <p>Click an element on the page to inspect and edit.</p>
+             </div>
           </div>
-          <div id="panel-tools" class="devlens-panel">
-             ${this.renderToolsTab()}
-          </div>
+          
            <div id="panel-export" class="devlens-panel">
-             ${this.renderExportTab()}
+             <div class="section-title">Generative Output</div>
+             <button class="btn-secondary" id="compile-code">Compile Selected to React</button>
+             <textarea class="code-export" readonly placeholder="JSX will appear here..."></textarea>
+             <div style="display:flex; gap:8px; margin-top:8px;">
+               <button class="btn-primary" id="copy-code">Copy JSX</button>
+               <span class="confidence-badge" id="ai-confidence"></span>
+             </div>
           </div>
         </div>
         
@@ -50,217 +75,153 @@ export class DevLensUI {
     `;
 
     this.attachEvents();
+    
+    // Global EventBus Subscribers
+    eventBus.on("selection:change", () => this.syncPanelToSelection());
+    eventBus.on("style:update", () => this.syncPanelToSelection());
 
-    // Zero-Config Quick Scan (500px scroll)
-    this.runQuickScan();
+    // Initialize State Mappings
+    this.syncPanelToSelection();
   }
 
-  runQuickScan() {
-    // Small delay to allow UI to settle
-    setTimeout(() => {
-      this.scanner.startActiveScan(
-        () => { },
-        (results) => {
-          this.designData = results.design;
-          // Don't auto-switch tabs, just update data
-          console.log('Quick scan complete');
-        },
-        true // isQuickScan mode (only 500px)
-      );
-    }, 500);
-  }
+  syncPanelToSelection() {
+    const designPanel = this.root.querySelector('#panel-design');
+    if (!designPanel) return;
 
-  setRipper(ripper) {
-    this.ripper = ripper;
-  }
-
-  addDetectedApi(name) {
-    if (!this.apis) this.apis = new Set();
-    if (!this.apis.has(name)) {
-      this.apis.add(name);
-      this.updateTechTab();
-    }
-  }
-
-  updateRipperState(active) {
-    const btn = this.root.querySelector('#toggle-ripper');
-    if (btn) {
-      btn.textContent = active ? 'Exit Inspector' : 'Inspect Component';
-      btn.classList.toggle('active', active);
-    }
-  }
-
-  showGeneratedCode(code) {
-    // Switch to export tab and show code
-    this.root.querySelector('[data-tab="export"]').click();
-    const area = this.root.querySelector('.code-export');
-    if (area) area.value = code;
-    const title = this.root.querySelector('.section-title.export-title');
-    if (title) title.textContent = 'Extracted Component';
-  }
-
-  updateTechTab() {
-    const el = this.root.querySelector('#panel-tech');
-    if (el && el.classList.contains('active')) {
-      el.innerHTML = this.renderTechTab();
-
-      // Re-attach start scan
-      const scanBtn = this.root.querySelector('#start-scan');
-      if (scanBtn) {
-        scanBtn.addEventListener('click', () => this.handleScan(scanBtn));
-      }
-    }
-  }
-
-  handleScan(scanBtn) {
-    scanBtn.disabled = true;
-    scanBtn.textContent = 'Scanning...';
-    this.root.querySelector('.scan-progress').classList.add('active');
-
-    this.scanner.startActiveScan(
-      (progress) => { },
-      (results) => {
-        this.designData = results.design;
-        this.animations = results.animations || [];
-        this.updateDesignTabs();
-
-        this.root.querySelector('.scan-progress').classList.remove('active');
-        scanBtn.textContent = 'Scan Complete';
-        scanBtn.disabled = false;
-
-        if (this.animations.length) this.showToast(`${this.animations.length} animations found`);
-      }
-    );
-  }
-
-  renderTechTab() {
-    const categories = ['frameworks', 'cssFrameworks', 'libraries'];
-    let html = '';
-
-    // Scan Button
-    html += `<button class="btn-primary" id="start-scan">Start Active Scan</button>`;
-
-    // APIs
-    if (this.apis && this.apis.size > 0) {
-      html += `<div class="section-title" style="margin-top:16px; color:#ff79c6">Backend / APIs</div>
-        <div class="card-grid">
-          ${Array.from(this.apis).map(api => `
-             <div class="tech-badge" style="border-color: rgba(255, 121, 198, 0.4);">
-               <span>${api}</span>
-             </div>
-          `).join('')}
-        </div>`;
+    if (store.selection.length === 0) {
+      designPanel.innerHTML = `
+        <div class="empty-selection-state">
+           <button class="btn-primary" id="toggle-ripper">${store.mode === "inspect" ? "Stop Inspecting" : "Select Element"}</button>
+           <p>${store.mode === "inspect" ? "Hover to highlight, Click to select." : "No elements selected."}</p>
+        </div>
+      `;
+      const btn = designPanel.querySelector('#toggle-ripper');
+      if (btn) btn.addEventListener('click', () => this.ripper.toggle(store.mode !== "inspect"));
+      return;
     }
 
-    categories.forEach(cat => {
-      const items = this.techData[cat] || [];
-      if (items.length) {
-        html += `<div class="section-title">${cat.replace(/([A-Z])/g, ' $1')}</div>`;
-        html += `<div class="card-grid">`;
-        items.forEach(item => {
-          html += `
-                <div class="tech-badge">
-                   <span>${item.name} ${item.version ? `<small style="opacity:0.6">v${item.version}</small>` : ''}</span>
-                   <span class="confidence">${item.confidence}</span>
-                </div>`;
-        });
-        html += `</div>`;
-      }
-    });
-
-    if (!html.includes('tech-badge')) html += `<p style="opacity:0.5; font-size:12px; margin-top:10px;">Click "Start Active Scan" to detect more.</p>`;
-
-    return html;
+    // A node is selected, render the Figma sidebar controls
+    designPanel.innerHTML = this.renderPropertiesSidebar();
+    this.attachPropertiesEvents(designPanel);
   }
 
-  renderDesignTab() {
-    if (!this.designData.colors.length) {
-      return `<div style="text-align:center; padding:20px; color:#fff; opacity:0.5;">
-            No design data.<br>Run "Start Active Scan".
-        </div>`;
-    }
-
-    const { colors, fonts } = this.designData;
+  renderPropertiesSidebar() {
+    // Multi-Select Resolvers
+    const getVal = (prop) => getMultiStyle(store.selection, prop) || '';
+    const formatMix = (val) => val === 'MIXED' ? '—' : val;
 
     return `
-      <div class="section-title">Colors</div>
-      <div class="color-grid">
-        ${colors.map(c => `<div class="color-swatch" style="background-color: ${c}" title="${c}" data-copy="${c}"></div>`).join('')}
+      <div class="props-header">
+         <span class="selection-count">${store.selection.length} Selected</span>
+         <div class="props-actions">
+           <button class="btn-icon" id="btn-revert" title="Revert Changes">↺ Revert</button>
+         </div>
       </div>
 
-      <div class="section-title">Typography</div>
-      <div class="card-grid">
-      ${fonts.map(f => `
-        <div class="tech-badge" style="display:block">
-          <div style="font-family:${f.family}; font-size:14px;">${f.family}</div>
-          <div style="font-size:10px; opacity:0.6; margin-top:4px;">
-             ${f.weight} • ${f.size}
+      <div class="prop-section">
+        <div class="section-title">Layout</div>
+        <div class="prop-row">
+          <label>Display</label>
+          <select data-prop="display" class="prop-input">
+             <option value="" disabled selected hidden>${formatMix(getVal('display'))}</option>
+             <option value="flex">flex</option>
+             <option value="grid">grid</option>
+             <option value="block">block</option>
+             <option value="inline-block">inline-block</option>
+             <option value="none">none</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label>Flex Dir</label>
+          <select data-prop="flexDirection" class="prop-input">
+             <option value="" disabled selected hidden>${formatMix(getVal('flexDirection'))}</option>
+             <option value="row">row</option>
+             <option value="column">column</option>
+          </select>
+        </div>
+        <div class="prop-row">
+          <label>Justify</label>
+          <select data-prop="justifyContent" class="prop-input">
+             <option value="" disabled selected hidden>${formatMix(getVal('justifyContent'))}</option>
+             <option value="center">center</option>
+             <option value="space-between">space-between</option>
+             <option value="flex-start">start</option>
+             <option value="flex-end">end</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="section-title">Spacing</div>
+        <div class="prop-grid">
+          <div><label>Padding</label><input type="text" data-prop="padding" class="prop-input" value="${formatMix(getVal('padding'))}"></div>
+          <div><label>Margin</label><input type="text" data-prop="margin" class="prop-input" value="${formatMix(getVal('margin'))}"></div>
+          <div><label>Gap</label><input type="text" data-prop="gap" class="prop-input" value="${formatMix(getVal('gap'))}"></div>
+          <div><label>Radius</label><input type="text" data-prop="borderRadius" class="prop-input" value="${formatMix(getVal('borderRadius'))}"></div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="section-title">Colors</div>
+        <div class="prop-row">
+          <label>Background</label>
+          <div class="color-picker-wrap">
+             <input type="color" data-prop="backgroundColor" class="prop-color-picker">
+             <input type="text" data-prop="backgroundColor" class="prop-input" value="${formatMix(getVal('backgroundColor'))}">
           </div>
         </div>
-      `).join('')}
+        <div class="prop-row">
+          <label>Text Fill</label>
+          <div class="color-picker-wrap">
+             <input type="color" data-prop="color" class="prop-color-picker">
+             <input type="text" data-prop="color" class="prop-input" value="${formatMix(getVal('color'))}">
+          </div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <div class="section-title">Typography</div>
+        <div class="prop-row">
+          <label>Font</label>
+          <input type="text" data-prop="fontFamily" class="prop-input" value="${formatMix(getVal('fontFamily'))}">
+        </div>
+        <div class="prop-grid">
+           <div><label>Weight</label><input type="text" data-prop="fontWeight" class="prop-input" value="${formatMix(getVal('fontWeight'))}"></div>
+           <div><label>Size</label><input type="text" data-prop="fontSize" class="prop-input" value="${formatMix(getVal('fontSize'))}"></div>
+        </div>
       </div>
     `;
   }
 
-  renderToolsTab() {
-    return `
-        <div class="section-title">Component Ripper</div>
-        <button class="btn-secondary" id="toggle-ripper" style="width:100%; justify-content:center;">Inspect Component</button>
-      
-        <div class="section-title">Time Warp & Animations</div>
-        <input type="range" min="0.1" max="2" step="0.1" value="1" id="speed-slider">
-        <div style="font-size:10px; opacity:0.6; display:flex; justify-content:space-between;">
-             <span>0.1x</span><span>1.0x</span><span>2.0x</span>
-        </div>
-        ${this.renderAnimationList()}
+  attachPropertiesEvents(panel) {
+    const inputs = panel.querySelectorAll('.prop-input');
+    inputs.forEach(input => {
+      input.addEventListener('input', (e) => {
+         const prop = e.target.getAttribute('data-prop');
+         let val = e.target.value;
+         // Pass to Debounced Style Engine caller
+         this.debouncedUpdate(prop, val);
+      });
+    });
 
-        <div class="section-title">Ghost Overlay</div>
-        <input type="file" id="overlay-upload" accept="image/*" style="font-size:12px;">
-        
-        <div class="section-title">Accessibility</div>
-        <button class="btn-secondary" id="toggle-a11y">Toggle High Contrast Check</button>
-      `;
-  }
-
-  renderAnimationList() {
-    if (!this.animations || !this.animations.length) return '';
-    return `<div style="margin-top:10px; max-height:100px; overflow-y:auto;">
-         ${this.animations.map(a => `
-           <div class="tech-badge" style="font-size:10px; padding:6px;">
-             <span>${a.type}</span>
-             <span style="color:#d8b4fe" class="copy-easing" data-easing="${a.easing}">${a.easing}</span>
-           </div>
-         `).join('')}
-      </div>`;
-  }
-
-  renderExportTab() {
-    return `
-        <div class="section-title export-title">Tailwind Config</div>
-        <textarea class="code-export" style="width:100%; height:150px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#a6e22e; font-family:monospace; font-size:11px; padding:8px;" readonly>${this.generateTailwindConfig()}</textarea>
-        <button class="btn-primary" id="copy-config">Copy Code</button>
-       `;
-  }
-
-  generateTailwindConfig() {
-    // Basic generation
-    return `// tailwind.config.js
-module.exports = {
-  theme: {
-    extend: {
-      colors: {
-         /* ... detected colors ... */
-      }
+    const revertBtn = panel.querySelector('#btn-revert');
+    if (revertBtn) {
+       revertBtn.addEventListener('click', () => {
+          store.selection.forEach(id => revertNode(id));
+       });
     }
   }
-}`;
-  }
 
-  showToast(msg) {
-    const toast = this.root.querySelector('#toast');
-    toast.textContent = msg;
-    toast.classList.add('visible');
-    setTimeout(() => toast.classList.remove('visible'), 2000);
+  handleStyleChange(prop, val) {
+    if (store.selection.length === 0) return;
+
+    if (store.selection.length === 1) {
+       updateStyle(store.selection[0], prop, val); // Fast Track
+    } else {
+       // Multi-select Batch track for proper undo history blocks later
+       const changes = store.selection.map(id => ({ nodeId: id, property: prop, value: val }));
+       batchUpdateStyles(changes);
+    }
   }
 
   attachEvents() {
@@ -269,123 +230,75 @@ module.exports = {
       tab.addEventListener('click', (e) => {
         this.root.querySelectorAll('.devlens-tab').forEach(t => t.classList.remove('active'));
         this.root.querySelectorAll('.devlens-panel').forEach(p => p.classList.remove('active'));
-
         const tabId = e.target.getAttribute('data-tab');
         e.target.classList.add('active');
         this.root.querySelector(`#panel-${tabId}`).classList.add('active');
       });
     });
 
-    // Actions
+    // Close
     this.root.querySelector('#close-btn').addEventListener('click', () => {
       this.root.dispatchEvent(new CustomEvent('close-devlens', { bubbles: true }));
     });
 
-    // Start Scan
-    const scanBtn = this.root.querySelector('#start-scan');
-    if (scanBtn) {
-      scanBtn.addEventListener('click', async () => {
-        scanBtn.disabled = true;
-        scanBtn.textContent = 'Scanning...';
-        this.root.querySelector('.scan-progress').classList.add('active');
+    // Codegen Compilation Hook
+    const compileBtn = this.root.querySelector('#compile-code');
+    if (compileBtn) {
+      compileBtn.addEventListener('click', () => {
+         if (store.selection.length === 0) {
+           this.showToast('Please select an element first.');
+           return;
+         }
 
-        await this.scanner.startActiveScan(
-          (progress) => { /* Update bar if we had width control */ },
-          (results) => {
-            this.designData = results.design;
-            this.updateDesignTabs();
-            this.root.querySelector('.scan-progress').classList.remove('active');
-            scanBtn.textContent = 'Scan Complete';
-            scanBtn.disabled = false;
-            // Switch to design tab
-            this.root.querySelector('[data-tab="design"]').click();
-          }
-        );
+         // Step 1: Force deep IR sync for export
+         buildExportIR(store.selection);
+
+         // Step 2: Component Clustering Map
+         const detector = new ComponentDetector(exportIR);
+         const { components, lists } = detector.detectPatterns();
+
+         // Step 3: Run Deterministic React Generator
+         const generator = new ReactGenerator(exportIR, components);
+         // Generate code anchored on the Primary Selected Node natively
+         const code = generator.generate(store.primary);
+
+         // Render UI
+         this.root.querySelector('.code-export').value = code;
+         
+         const score = generator.getVerificationScore();
+         const confBadge = this.root.querySelector('#ai-confidence');
+         confBadge.textContent = 'Confidence: ' + score;
+         confBadge.style.color = score > 0.8 ? '#a6e22e' : '#ff5555';
       });
     }
 
-    // Tools - Speed
-    const speedSlider = this.root.querySelector('#speed-slider');
-    if (speedSlider) {
-      speedSlider.addEventListener('input', (e) => {
-        this.scanner.setPlaybackRate(parseFloat(e.target.value));
-      });
-    }
-
-    // Tools - A11y
-    const a11yBtn = this.root.querySelector('#toggle-a11y');
-    if (a11yBtn) {
-      let active = false;
-      a11yBtn.addEventListener('click', () => {
-        active = !active;
-        this.scanner.toggleA11yHeatmap(active);
-        a11yBtn.style.background = active ? 'rgba(97, 218, 251, 0.3)' : '';
-      });
-    }
-
-    // Copy Colors
-    this.root.addEventListener('click', (e) => {
-      if (e.target.classList.contains('color-swatch')) {
-        const color = e.target.getAttribute('data-copy');
-        copyToClipboard(color).then(() => this.showToast(`Copied ${color}`));
-      }
-
-      // Copy Easing
-      if (e.target.classList.contains('copy-easing')) {
-        const easing = e.target.getAttribute('data-easing');
-        copyToClipboard(easing).then(() => this.showToast('Copied Easing!'));
-      }
-      if (e.target.id === 'copy-config') {
-        const code = this.root.querySelector('.code-export').value;
-        copyToClipboard(code).then(() => this.showToast('Copied Code!'));
-      }
-    });
-
-    // Ripper
-    const ripperBtn = this.root.querySelector('#toggle-ripper');
-    if (ripperBtn) {
-      ripperBtn.addEventListener('click', () => {
-        const isActive = ripperBtn.classList.contains('active');
-        if (this.ripper) {
-          this.ripper.toggle(!isActive);
-          this.updateRipperState(!isActive);
-        }
-      });
-    }
-
-    // Ghost Overlay Upload
-    const upload = this.root.querySelector('#overlay-upload');
-    if (upload) {
-      upload.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            this.createGhostOverlay(evt.target.result);
-          };
-          reader.readAsDataURL(file);
-        }
+    const copyBtn = this.root.querySelector('#copy-code');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+         const code = this.root.querySelector('.code-export').value;
+         if(code) {
+           copyToClipboard(code).then(() => this.showToast('JSX Copied!'));
+         }
       });
     }
   }
 
-  createGhostOverlay(url) {
-    const img = document.createElement('img');
-    img.src = url;
-    img.style.position = 'fixed';
-    img.style.top = '0';
-    img.style.left = '0';
-    img.style.width = '100vw'; // full width
-    img.style.opacity = '0.5';
-    img.style.pointerEvents = 'none'; // click through
-    img.style.zIndex = 2147483645;
-    img.id = 'devlens-ghost';
-    document.body.appendChild(img);
-    this.showToast('Overlay Loaded (50% Opacity)');
+  renderTechTab() {
+    return `<div style="padding: 10px; color:#aaa; font-size:12px;">Tech Radar currently disabled while running inside NextGen codegen UI.</div>`;
   }
 
-  updateDesignTabs() {
-    this.root.querySelector('#panel-design').innerHTML = this.renderDesignTab();
-    this.root.querySelector('#panel-export').innerHTML = this.renderExportTab();
+  updateRipperState(active) {
+    const btn = this.root.querySelector('#toggle-ripper');
+    if (btn) {
+      btn.textContent = active ? 'Stop Inspecting' : 'Select Element';
+      btn.classList.toggle('active', active);
+    }
+  }
+
+  showToast(msg) {
+    const toast = this.root.querySelector('#toast');
+    toast.textContent = msg;
+    toast.classList.add('visible');
+    setTimeout(() => toast.classList.remove('visible'), 2000);
   }
 }

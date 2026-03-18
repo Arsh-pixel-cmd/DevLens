@@ -23,7 +23,15 @@
                 "src/detector.js",
                 "src/scanner.js",
                 "src/clipboard.js",
-                "src/ripper.js"
+                "src/ripper.js",
+                "src/store.js",
+                "src/eventBus.js",
+                "src/styleEngine.js",
+                "src/irBuilder.js",
+                "src/styleNormalizer.js",
+                "src/componentDetector.js",
+                "src/codegen/reactGenerator.js",
+                "src/codegen/tailwindMapper.js"
             ],
             "matches": [
                 "<all_urls>"

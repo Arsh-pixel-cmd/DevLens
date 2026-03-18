@@ -35,6 +35,24 @@ export class ComponentDetector {
     this.nodes = irNodes; // Map of NodeIRs
     this.components = new Map(); 
     this.listClusters = new Map();
+    this.manualSignatures = new Set();
+  }
+
+  addManualSignature(sig) {
+    this.manualSignatures.add(sig);
+  }
+
+  expandBoundary(nodeId) {
+    const node = this.nodes.get(nodeId);
+    if (!node || !node.parentId) return nodeId;
+
+    const parent = this.nodes.get(node.parentId);
+    // Boundary Expansion: If parent is a logical wrapper (div/section) with 1 child, expand to it
+    if (parent && parent.childrenIds && parent.childrenIds.length === 1 && 
+        ["div", "section", "article", "li"].includes(parent.tag)) {
+        return this.expandBoundary(node.parentId);
+    }
+    return nodeId;
   }
 
   detectPatterns() {
@@ -114,6 +132,13 @@ export class ComponentDetector {
         
         this.components.set(group.sig, { name, instances: group.nodeIds, props: new Set() });
         
+        group.nodeIds.forEach(id => {
+          this.nodes.get(id).isComponentInstance = true;
+          this.nodes.get(id).componentName = name;
+        });
+      } else if (this.manualSignatures.has(group.sig)) {
+        const name = `Custom${componentCounter++}`;
+        this.components.set(group.sig, { name, instances: group.nodeIds, props: new Set() });
         group.nodeIds.forEach(id => {
           this.nodes.get(id).isComponentInstance = true;
           this.nodes.get(id).componentName = name;

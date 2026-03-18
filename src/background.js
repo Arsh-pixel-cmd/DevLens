@@ -39,14 +39,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'AI_REFINER_FETCH') {
     (async () => {
       try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        const res = await fetch(message.baseUrl, {
           method: "POST",
           headers: { 
              "Content-Type": "application/json", 
              "Authorization": `Bearer ${message.apiKey}` 
           },
           body: JSON.stringify({
-             model: "gpt-4-turbo-preview",
+             model: message.modelId,
              temperature: 0.1,
              messages: [{ role: "user", content: message.prompt }]
           })

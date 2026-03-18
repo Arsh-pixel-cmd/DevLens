@@ -9,7 +9,7 @@
         "storage"
     ],
     "host_permissions": [
-        "https://api.openai.com/*"
+        "*://*/*"
     ],
     "background": {
         "service_worker": "src/background.js"

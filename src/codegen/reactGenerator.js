@@ -28,6 +28,13 @@ export class ReactGenerator {
     const clone = rootNode.element.cloneNode(true);
     
     const transformElement = (el) => {
+       // Search for nodeId in store
+       let nodeId = null;
+       for (const [id, n] of store.nodes.entries()) {
+         if (n.element === el) { nodeId = id; break; }
+       }
+       if (nodeId) el.setAttribute('data-dev-id', nodeId);
+
        if (el.hasAttribute('class')) { el.setAttribute('className', el.getAttribute('class')); el.removeAttribute('class'); }
        if (el.hasAttribute('for')) { el.setAttribute('htmlFor', el.getAttribute('for')); el.removeAttribute('for'); }
        
@@ -79,7 +86,14 @@ export class ReactGenerator {
     };
 
     let html = buildIndentedHTML(clone, 0);
-    html = html.trimEnd().replace(/ class="/g, ' className="').replace(/style="__STYLE_PLACEHOLDER_(.*?)__"/g, 'style={$1}');
+    html = html.trimEnd()
+      .replace(/ class="/g, ' className="')
+      .replace(/data-dev-id="(.*?)"/g, 'data-dev-id="$1"') // Keep for now, will handle in replace
+      .replace(/style="__STYLE_PLACEHOLDER_(.*?)__"/g, 'style={$1}');
+    
+    // Convert data-dev-id back to brace-wrapped if needed, or leave as string prop
+    html = html.replace(/data-dev-id="(.*?)"/g, 'data-dev-id="$1"'); 
+
     return `export default function DevLensOutput() {\n  return (\n${html}\n  );\n}\n`;
   }
 
@@ -146,6 +160,7 @@ export class ReactGenerator {
      if (Object.keys(style).length > 2) this.confidenceScore *= 0.95;
 
      let props = [];
+     if (node.id) props.push(`data-dev-id="${node.id}"`);
      if (finalClasses) props.push(`className="${finalClasses}"`);
      if (Object.keys(style).length > 0) props.push(`style={${JSON.stringify(style)}}`);
      

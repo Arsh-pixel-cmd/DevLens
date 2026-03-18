@@ -43,8 +43,12 @@ function applyStyles(node) {
   try {
     const el = node.element;
     for (const key in node.overrides) {
-      if (el.style[key] !== node.overrides[key]) {
-        el.style.setProperty(key, node.overrides[key], "important");
+      const kebabKey = key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+      const val = node.overrides[key];
+      
+      // We explicitly check .style[key] since standard DOM reads via camelCase
+      if (el.style[key] !== val) {
+        el.style.setProperty(kebabKey, val, "important");
       }
     }
   } catch (err) {

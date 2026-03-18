@@ -6,14 +6,16 @@
  * Protects against Hallucinations, Cost Crashes, and Broken Exports via Strict Fallback pipelines.
  */
 export class AIRefiner {
-  constructor(apiKey) {
+  constructor(apiKey, baseUrl, modelId) {
     this.apiKey = apiKey;
+    this.baseUrl = baseUrl;
+    this.modelId = modelId;
   }
 
   async refine(jsxInput, irData, confidenceScore) {
-     // Gating Requirement 7: Skip AI for low confidence or missing API keys to save costs!
-     if (!this.apiKey || confidenceScore < 0.70) {
-        return { mode: 'basic', code: jsxInput, reason: 'Confidence threshold unmet or missing Key.' };
+     // Gating Requirement 7: Skip AI for low confidence or completely broken local context
+     if (!this.baseUrl || confidenceScore < 0.70) {
+        return { mode: 'basic', code: jsxInput, reason: 'Confidence threshold unmet or missing Base URL.' };
      }
 
      // Gating Requirement 8/9: Token/Cost Control! 
@@ -50,6 +52,8 @@ export class AIRefiner {
            chrome.runtime.sendMessage({
                type: 'AI_REFINER_FETCH',
                apiKey: this.apiKey,
+               baseUrl: this.baseUrl,
+               modelId: this.modelId,
                prompt: JSON.stringify(prompt)
            }, resolve);
        });
@@ -59,6 +63,10 @@ export class AIRefiner {
        }
        
        const data = res.data;
+       
+       if (data.error && data.error.message) {
+           throw new Error("AI Provider Rejection: " + data.error.message);
+       }
        
        if (!data.choices || !data.choices[0]) {
           throw new Error("Invalid API Response Structure.");

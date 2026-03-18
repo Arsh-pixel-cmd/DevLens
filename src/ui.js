@@ -10,6 +10,7 @@ import { AIRefiner } from './codegen/aiRefiner.js';
 import { PropExtractor } from './propExtractor.js';
 import { buildExportIR, exportIR } from './irBuilder.js';
 import { copyToClipboard } from './clipboard.js';
+import { buildSnapshot } from './snapshotBuilder.js';
 
 function debounce(func, wait) {
   let timeout;
@@ -29,8 +30,41 @@ export class DevLensUI {
     // Instantiate our new State-Driven Ripper
     this.ripper = new ComponentRipper(this);
 
+    // Initialize System 4 Worker Pipeline
+    this.initWorker();
+
     // Debounce UI inputs sending requests to the core engine (RAF)
     this.debouncedUpdate = debounce(this.handleStyleChange.bind(this), 16);
+    this.debouncedSyncCode = debounce(this.handleCodeSync.bind(this), 300);
+    
+    // Sync Guards
+    this.isSyncing = false;
+  }
+
+  initWorker() {
+    try {
+      this.worker = new Worker(chrome.runtime.getURL('src/workers/scanner.worker.js'));
+      this.worker.onmessage = (e) => this.handleWorkerMessage(e.data);
+      console.log("[DevLens] Background Scanner Worker Initialized.");
+    } catch (err) {
+      console.error("[DevLens] Failed to initialize worker. Falling back to main thread.", err);
+    }
+  }
+
+  handleWorkerMessage(data) {
+    const { type, jobId, data: result, error } = data;
+
+    if (jobId !== store.currentJobId) return; // Ignore stale jobs
+
+    if (type === 'ERROR') {
+      console.error("[DevLens Worker Error]", error);
+      this.showToast("Worker Processing Failed. Fallback active.");
+      return;
+    }
+
+    if (type === 'IR_COMPLETE') {
+      this.onIRComplete(result);
+    }
   }
 
   render() {
@@ -39,6 +73,7 @@ export class DevLensUI {
         <div class="devlens-header">
           <span class="devlens-title">DevLens Engine <span class="badge">PRO</span></span>
           <div class="actions-right">
+             <button class="devlens-btn-icon" id="debug-btn" title="Toggle Debug Mode">🐞</button>
              <button class="devlens-btn-icon" id="min-btn">_</button>
              <button class="devlens-btn-icon" id="close-btn">✕</button>
           </div>
@@ -79,11 +114,16 @@ export class DevLensUI {
              </div>
              
              <div style="margin-bottom:24px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
-                <label class="section-title" style="display:block; margin-bottom:6px; color:#a6e22e;">✨ AI Refinement Firewall</label>
-                <div style="font-size:10px; color:#aaa; margin-bottom:12px; line-height:1.4;">Insert an OpenAI Key to securely unlock contextual naming and logic refinement. Keys are vaulted strictly natively.</div>
-                <div style="display:flex; gap:8px;">
-                   <input type="password" id="ai-key" class="prop-input" placeholder="sk-proj-..." style="flex:1; padding:8px;">
-                   <button class="btn-primary" id="save-key" style="width:auto; padding:8px 16px;">Vault</button>
+                <label class="section-title" style="display:block; margin-bottom:6px; color:#a6e22e;">✨ Universal AI Refinement</label>
+                <div style="font-size:10px; color:#aaa; margin-bottom:12px; line-height:1.4;">Connect to ANY model supporting the standard Chat format (OpenAI, Groq, Ollama, OpenRouter).</div>
+                
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                   <input type="text" id="ai-url" class="prop-input" placeholder="Base URL (e.g. https://api.openai.com/v1/chat/completions)" style="width:100%; padding:8px;">
+                   <div style="display:flex; gap:8px;">
+                      <input type="text" id="ai-model" class="prop-input" placeholder="Target Model (e.g. gpt-4)" style="flex:1; padding:8px;">
+                      <input type="password" id="ai-key" class="prop-input" placeholder="API Key" style="flex:1; padding:8px;">
+                   </div>
+                   <button class="btn-primary" id="save-key" style="width:100%; padding:8px; margin-top:4px;">Save Configuration</button>
                 </div>
              </div>
 
@@ -106,7 +146,10 @@ export class DevLensUI {
     
     // Global EventBus Subscribers
     eventBus.on("selection:change", () => this.syncPanelToSelection());
-    eventBus.on("style:update", () => this.syncPanelToSelection());
+    eventBus.on("style:update", (payload) => {
+       this.syncPanelToSelection();
+       this.handleVisualSync(payload);
+    });
     eventBus.on("inspection:start", () => this.showInsightLoadingState());
     eventBus.on("inspection:data_complete", (res) => this.renderInsightFusion(res));
 
@@ -222,7 +265,105 @@ export class DevLensUI {
           <div class="section-title" style="margin-bottom:10px;">Data Binding Layer</div>
           ${dataBlock}
         </div>
+
+        <div class="prop-section" style="margin-top:24px; display:flex; flex-wrap:wrap; gap:8px;">
+           <button class="btn-secondary" id="make-comp-btn" style="flex:1; min-width:80px; font-size:11px;">🧩 Component</button>
+           <button class="btn-secondary" id="clone-btn" style="flex:1; min-width:80px; font-size:11px;">👯 Clone</button>
+           <button class="btn-secondary" id="ai-explain-btn" style="flex:1; min-width:80px; font-size:11px;">🧠 AI Explain</button>
+        </div>
      `;
+
+     // Attach Killer Feature Listeners
+     const makeBtn = panel.querySelector('#make-comp-btn');
+     if (makeBtn) {
+        makeBtn.onclick = () => this.handleMakeComponent(store.selection[0]);
+     }
+
+     const explainBtn = panel.querySelector('#ai-explain-btn');
+     if (explainBtn) {
+        explainBtn.onclick = () => this.handleAIExplain(store.selection[0]);
+     }
+
+     const cloneBtn = panel.querySelector('#clone-btn');
+     if (cloneBtn) {
+        cloneBtn.onclick = () => this.handleClone(store.selection[0]);
+     }
+  }
+
+  handleClone(nodeId) {
+     const node = store.nodes.get(nodeId);
+     if (!node || !node.element) return;
+     
+     const clone = node.element.cloneNode(true);
+     node.element.parentNode.insertBefore(clone, node.element.nextSibling);
+     
+     this.showToast("Section Cloned Successfully!");
+     // Re-trigger ripper to pick up new node if selected
+  }
+
+  async handleMakeComponent(nodeId) {
+     if (!nodeId) return;
+     this.showToast("Expanding Boundaries...");
+     
+     // 1. Snapshot and prime IR
+     buildExportIR([nodeId]);
+     const detector = new ComponentDetector(exportIR);
+     
+     // 2. Expand Boundary (Mandatory Fix)
+     const expandedId = detector.expandBoundary(nodeId);
+     const node = exportIR.get(expandedId);
+     
+     if (node) {
+        detector.addManualSignature(node.structuralFingerprint);
+        this.showToast(`🧩 Created <${node.tag} /> Component`);
+        
+        // Switch to Export tab and trigger compilation
+        this.root.querySelector('[data-tab="export"]').click();
+        this.root.querySelector('#compile-code').click();
+     }
+  }
+
+  async handleAIExplain(nodeId) {
+     if (!nodeId) return;
+     const panel = this.root.querySelector('#panel-intelligence');
+     const explainBtn = panel.querySelector('#ai-explain-btn');
+     
+     explainBtn.textContent = "🧠 Thinking...";
+     explainBtn.disabled = true;
+
+     try {
+        const node = exportIR.get(nodeId);
+        if (!node) throw new Error("IR not primed. Please select and compile first.");
+
+        const stored = await new Promise(r => chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model'], r));
+        const refiner = new AIRefiner(stored.ai_key, stored.ai_url, stored.ai_model);
+        
+        // Pruned Context Prompt (MANDATORY Fix)
+        const prompt = `Explain this UI element's layout and logic in 2 sentences. 
+        Tag: ${node.tag}, Layout: ${JSON.stringify(node.layout)}, Semantics: ${node.semantics}.
+        Why was ${node.layout.display} used here?`;
+
+        const response = await refiner.refine(prompt, exportIR, 1.0); // Abuse refiner for explanation
+        
+        // Show as a custom overlay or in the data block
+        const dataBindingSection = panel.querySelector('.prop-section:last-of-type');
+        const explainBlock = document.createElement('div');
+        explainBlock.style.marginTop = '12px';
+        explainBlock.style.padding = '10px';
+        explainBlock.style.background = 'rgba(166, 226, 46, 0.05)';
+        explainBlock.style.border = '1px solid rgba(166, 226, 46, 0.2)';
+        explainBlock.style.borderRadius = '6px';
+        explainBlock.innerHTML = `<small style="color:#a6e22e; display:block; margin-bottom:4px;">AI ELMENT EXPLAIN</small>
+                                   <div style="font-size:11px; color:#ddd; line-height:1.4;">${response.code || response.explanation || response.error}</div>`;
+        
+        panel.appendChild(explainBlock);
+
+     } catch (err) {
+        this.showToast("AI Explanation failed.");
+     } finally {
+        explainBtn.textContent = "🧠 AI Explain";
+        explainBtn.disabled = false;
+     }
   }
 
   renderPropertiesSidebar() {
@@ -358,19 +499,44 @@ export class DevLensUI {
       this.root.dispatchEvent(new CustomEvent('close-devlens', { bubbles: true }));
     });
 
-    // Key Management
+    // Debug Mode Toggle
+    const debugBtn = this.root.querySelector('#debug-btn');
+    if (debugBtn) {
+       debugBtn.onclick = () => {
+          store.debug = !store.debug;
+          debugBtn.style.color = store.debug ? '#a6e22e' : '';
+          this.showToast(`Debug Mode: ${store.debug ? 'ON' : 'OFF'}`);
+          console.log("[DevLens Debug State]", { 
+            nodes: store.nodes, 
+            mappings: store.mappings, 
+            lastUpdate: store.lastUpdateTimestamp 
+          });
+       };
+    }
+
+    // Universal Key Management
     const saveKeyBtn = this.root.querySelector('#save-key');
     const inputKey = this.root.querySelector('#ai-key');
+    const inputUrl = this.root.querySelector('#ai-url');
+    const inputModel = this.root.querySelector('#ai-model');
+    
+    // Set absolute defaults natively in the UI mapping
+    inputUrl.value = 'https://api.openai.com/v1/chat/completions';
+    inputModel.value = 'gpt-4o';
+    
     if (saveKeyBtn) {
-       chrome.storage.local.get(['openai_key'], (res) => {
-          if (res.openai_key) inputKey.value = "********";
+       chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model'], (res) => {
+          if (res.ai_key) inputKey.value = "********";
+          if (res.ai_url) inputUrl.value = res.ai_url;
+          if (res.ai_model) inputModel.value = res.ai_model;
        });
        saveKeyBtn.addEventListener('click', () => {
           if (inputKey.value && inputKey.value !== "********") {
-             chrome.storage.local.set({ openai_key: inputKey.value });
-             this.showToast('API Key Secured Natively');
+             chrome.storage.local.set({ ai_key: inputKey.value });
              inputKey.value = "********";
           }
+          chrome.storage.local.set({ ai_url: inputUrl.value, ai_model: inputModel.value });
+          this.showToast('AI Config Saved Natively!');
        });
     }
 
@@ -378,51 +544,39 @@ export class DevLensUI {
     const compileBtn = this.root.querySelector('#compile-code');
     if (compileBtn) {
       compileBtn.addEventListener('click', async () => {
-         if (store.selection.length === 0) {
-           this.showToast('Please select an element first.');
-           return;
-         }
+        if (store.selection.length === 0) {
+          this.showToast('Please select an element first.');
+          return;
+        }
 
-         compileBtn.textContent = 'Compiling AST...';
-         const mode = this.root.querySelector('#codegen-mode').value;
+        if (this.isSyncing) return;
+        this.isSyncing = true;
 
-         // Phase 1: Natively generate the pure NodeIR mapped Tree
-         const rootNodeId = store.selection[0];
-         buildExportIR([rootNodeId]); 
-         
-         // Phase 2: Execute Strict Prop Extraction over the AST
-         const extractor = new PropExtractor(exportIR);
-         extractor.execute();
-         
-         // Phase 3: Enforce Component Extraction (0.85% Similarities)
-         const componentDetector = new ComponentDetector(exportIR);
-         componentDetector.detectPatterns();
+        compileBtn.textContent = 'Snapshotting DOM...';
 
-         // Phase 4: Deterministic Fallback Generation
-         const generator = new ReactGenerator(exportIR, componentDetector.components);
-         let code = generator.generate(rootNodeId, mode);
-         const score = generator.getVerificationScore();
+        // Phase 1: Main Thread Snapshotting (Atomic Read)
+        const rootEl = store.nodes.get(store.selection[0])?.element;
+        if (!rootEl) {
+          this.isSyncing = false;
+          return;
+        }
 
-         // Phase 5: Gated AI Validation Path
-         let aiMode = "Deterministic";
-         if (mode === "abstract") {
-             compileBtn.textContent = 'Refining via AI...';
-             const stored = await new Promise(r => chrome.storage.local.get(['openai_key'], r));
-             if (stored.openai_key) {
-                const refiner = new AIRefiner(stored.openai_key);
-                const aiResult = await refiner.refine(code, exportIR, score);
-                code = aiResult.code;
-                aiMode = aiResult.mode;
-             }
-         }
+        const snapshot = buildSnapshot(rootEl);
 
-         this.root.querySelector('.code-export').value = code;
-         
-         const confBadge = this.root.querySelector('#ai-confidence');
-         confBadge.innerHTML = `Conf: ${score} <span style="color:#aaa; font-size:9px;">[${aiMode}]</span>`;
-         confBadge.style.color = score > 0.8 ? '#a6e22e' : '#ff5555';
-         
-         compileBtn.textContent = 'Compile Selection';
+        // Phase 2: Background Worker Processing
+        store.currentJobId = crypto.randomUUID();
+        compileBtn.textContent = 'Worker Processing...';
+
+        this.worker.postMessage({
+          type: 'GENERATE_IR',
+          jobId: store.currentJobId,
+          payload: { snapshot }
+        });
+
+        // We now wait for the worker to echo back via onIRComplete
+        // The actual generation logic moves to a private method
+        this.pendingMode = this.root.querySelector('#codegen-mode').value;
+        this.compileBtn = compileBtn;
       });
     }
 
@@ -434,6 +588,192 @@ export class DevLensUI {
            copyToClipboard(code).then(() => this.showToast('JSX Copied!'));
          }
       });
+    }
+
+    // Code Sync Hook
+    const codeEditor = this.root.querySelector('.code-export');
+    if (codeEditor) {
+      codeEditor.removeAttribute('readonly'); // Unlock for bi-directional sync
+      codeEditor.addEventListener('input', (e) => {
+        this.debouncedSyncCode(e.target.value);
+      });
+    }
+  }
+
+  handleCodeSync(code) {
+    if (!code || this.isSyncing) return;
+    this.isSyncing = true;
+    
+    try {
+      // System 4: Surgical Extraction Loop
+      // We look for [data-dev-id="ID"] followed by className="..." or style={{...}}
+      const nodeRegex = /<([a-z0-9]+)\s+[^>]*data-dev-id="([^"]+)"([^>]*)/gi;
+      let match;
+      
+      const timestamp = Date.now();
+      store.lastUpdateSource = "CODE";
+      store.lastUpdateTimestamp = timestamp;
+
+      while ((match = nodeRegex.exec(code)) !== null) {
+        const tag = match[1];
+        const nodeId = match[2];
+        const propsStr = match[3];
+
+        const node = store.nodes.get(nodeId);
+        if (!node || !document.contains(node.element)) continue;
+
+        // 1. Extract className
+        const classMatch = /className="([^"]*)"/.exec(propsStr);
+        if (classMatch) {
+          node.element.className = classMatch[1];
+        }
+
+        // 2. Extract style
+        const styleMatch = /style={{([^}]*)}}/.exec(propsStr);
+        if (styleMatch) {
+          try {
+            const rawStyle = styleMatch[1].replace(/'/g, '"');
+            const styleObj = JSON.parse(`{${rawStyle}}`);
+            Object.assign(node.element.style, styleObj);
+          } catch(e) { /* partial style parse fail */ }
+        }
+
+        // 3. Extract safe attributes (src, href, alt)
+        const attrRegex = /(src|href|alt)="([^"]*)"/gi;
+        let attrMatch;
+        while ((attrMatch = attrRegex.exec(propsStr)) !== null) {
+          node.element.setAttribute(attrMatch[1], attrMatch[2]);
+        }
+      }
+
+      this.showToast("⚡ UI Synced to Code");
+
+    } catch (err) {
+      console.warn("[DevLens] Code Sync Failed:", err);
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  handleVisualSync(payload) {
+    if (this.isSyncing || !payload.nodeId) return;
+    
+    const codeEditor = this.root.querySelector('.code-export');
+    if (!codeEditor || !codeEditor.value) return;
+
+    this.isSyncing = true;
+    try {
+      let code = codeEditor.value;
+      const nodeId = payload.nodeId;
+      const node = store.nodes.get(nodeId);
+      if (!node) return;
+
+      // Surgical replacement based on data-dev-id
+      // We look for the tag that has this data-dev-id
+      const tagRegex = new RegExp(`(<[a-z0-9]+\\s+[^>]*data-dev-id="${nodeId}"[^>]*>)`, 'gi');
+      const match = tagRegex.exec(code);
+
+      if (match) {
+        let tagContent = match[1];
+        const oldTag = tagContent;
+
+        // If it's a className update
+        if (payload.property === 'className' || payload.classes) {
+          const newClasses = payload.classes || node.element.className;
+          if (tagContent.includes('className="')) {
+            tagContent = tagContent.replace(/className="[^"]*"/, `className="${newClasses}"`);
+          } else {
+            tagContent = tagContent.replace(/>$/, ` className="${newClasses}">`).replace(/\/>$/, ` className="${newClasses}" />`);
+          }
+        } 
+        
+        // If it's a style update
+        else if (payload.property) {
+          // For simplicity in the surgical regex, if it's a style update we might want to just update the style prop
+          // But since we use Tailwind mostly, simple className updates are the common case.
+          // For raw styles:
+          if (tagContent.includes('style={{')) {
+             // This is harder to surgically replace with regex without a parser, 
+             // but we can try to find the specific key.
+             const styleKey = payload.property;
+             const styleVal = payload.value;
+             const keyRegex = new RegExp(`("${styleKey}"|${styleKey}):\\s*"[^"]*"`, 'g');
+             if (keyRegex.test(tagContent)) {
+               tagContent = tagContent.replace(keyRegex, `"${styleKey}": "${styleVal}"`);
+             }
+          }
+        }
+
+        if (tagContent !== oldTag) {
+          code = code.replace(oldTag, tagContent);
+          codeEditor.value = code;
+        }
+      }
+    } catch (err) {
+      console.warn("[DevLens] Visual Sync Failed:", err);
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  async onIRComplete(result) {
+    const compileBtn = this.compileBtn;
+    const mode = this.pendingMode;
+
+    try {
+      compileBtn.textContent = 'Rebuilding Code...';
+
+      // Update the exportIR map with data from the worker
+      exportIR.clear();
+      result.nodes.forEach(([id, ir]) => {
+        exportIR.set(id, ir);
+        // Also update store.nodes metadata (without stripping the element reference!)
+        const node = store.nodes.get(id);
+        if (node) {
+          Object.assign(node, ir);
+        }
+      });
+
+      // Execute Intelligence Pipeline (Still Main Thread for now, but IR is primed)
+      const extractor = new PropExtractor(exportIR);
+      extractor.execute();
+      
+      const componentDetector = new ComponentDetector(exportIR);
+      componentDetector.detectPatterns();
+
+      const generator = new ReactGenerator(exportIR, componentDetector.components);
+      let code = generator.generate(result.rootId, mode);
+      const score = generator.getVerificationScore();
+
+      let aiMode = "Deterministic";
+      if (mode === "abstract") {
+          compileBtn.textContent = 'Refining via AI...';
+          const stored = await new Promise(r => chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model'], r));
+          
+          const useKey = stored.ai_key || 'mock-local-key';
+          const useUrl = stored.ai_url || 'https://api.openai.com/v1/chat/completions';
+          const useModel = stored.ai_model || 'gpt-4o';
+          
+          if (useUrl && useModel) {
+             const refiner = new AIRefiner(useKey, useUrl, useModel);
+             const aiResult = await refiner.refine(code, exportIR, score);
+             code = aiResult.code;
+             aiMode = aiResult.mode;
+          }
+      }
+
+      this.root.querySelector('.code-export').value = code;
+      
+      const confBadge = this.root.querySelector('#ai-confidence');
+      confBadge.innerHTML = `Conf: ${score} <span style="color:#aaa; font-size:9px;">[${aiMode}]</span>`;
+      confBadge.style.color = score > 0.8 ? '#a6e22e' : '#ff5555';
+
+    } catch (err) {
+      console.error("[DevLens] Codegen Pipeline Failed:", err);
+      this.showToast("Codegen Error. Check console.");
+    } finally {
+      this.isSyncing = false;
+      compileBtn.textContent = 'Compile Selection';
     }
   }
 

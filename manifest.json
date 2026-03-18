@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "DevLens Ultra",
-    "version": "1.1",
+    "version": "1.3",
     "description": "Professional-grade Figma + DevTools + React Code Generator. Dissect design systems and extract clean code instantly.",
     "icons": {
         "16": "assets/icon16.png",
@@ -20,11 +20,19 @@
         "service_worker": "src/background.js"
     },
     "action": {
-        "default_title": "Activate DevLens"
+        "default_title": "Activate DevLens",
+        "default_icon": {
+            "16": "assets/icon16.png",
+            "48": "assets/icon48.png",
+            "128": "assets/icon128.png"
+        }
     },
     "web_accessible_resources": [
         {
             "resources": [
+                "assets/icon16.png",
+                "assets/icon48.png",
+                "assets/icon128.png",
                 "src/styles.css",
                 "src/ui.js",
                 "src/detector.js",

@@ -38,7 +38,9 @@
                 "src/mainWorld.js",
                 "src/dataInspector.js",
                 "src/layoutInspector.js",
-                "src/propExtractor.js"
+                "src/propExtractor.js",
+                "src/snapshotBuilder.js",
+                "src/workers/scanner.worker.js"
             ],
             "matches": [
                 "<all_urls>"

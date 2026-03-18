@@ -308,3 +308,35 @@
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* --- Animation Controls --- */
+.anim-scrubber {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    height: 4px;
+    border-radius: 2px;
+    outline: none;
+    margin: 8px 0;
+}
+
+.anim-scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #61dafb;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 5px rgba(97, 218, 251, 0.5);
+    transition: transform 0.1s ease;
+}
+
+.anim-scrubber::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.animation-item:hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(97, 218, 251, 0.2) !important;
+}

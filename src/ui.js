@@ -31,7 +31,7 @@ export class DevLensUI {
     this.ripper = new ComponentRipper(this);
 
     // Initialize System 4 Worker Pipeline
-    this.initWorker();
+    this.workerPromise = this.initWorker();
 
     // Debounce UI inputs sending requests to the core engine (RAF)
     this.debouncedUpdate = debounce(this.handleStyleChange.bind(this), 16);
@@ -41,13 +41,52 @@ export class DevLensUI {
     this.isSyncing = false;
   }
 
-  initWorker() {
+  async initWorker() {
     try {
-      this.worker = new Worker(chrome.runtime.getURL('src/workers/scanner.worker.js'));
+      // 1. Global Heuristic: Check if the site appears to have a strict CSP that blocks workers
+      // We look for CSP meta tags or the presence of nonces (a sign of high security)
+      const hasStrictCSP = () => {
+        const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+        if (meta && (meta.content.includes('worker-src') || meta.content.includes('script-src'))) return true;
+        if (document.querySelector('script[nonce]')) return true;
+        // Common high-security domains as fallback
+        const host = window.location.hostname;
+        if (host.includes('stripe.com') || host.includes('paypal.com') || host.includes('github.com')) return true;
+        return false;
+      };
+
+      if (hasStrictCSP()) {
+        this.worker = null;
+        console.log("[DevLens] Strict CSP detected. Standardizing on Main-Thread Engine (Zero-Noise Mode).");
+        return false;
+      }
+
+      // 2. Capability Probe: Attempt to initialize a lightweight worker
+      let probe;
+      try {
+        const probeBlob = new Blob([''], { type: 'application/javascript' });
+        const probeUrl = URL.createObjectURL(probeBlob);
+        probe = new Worker(probeUrl);
+        probe.terminate();
+        URL.revokeObjectURL(probeUrl);
+      } catch (e) {
+        this.worker = null;
+        return false;
+      }
+
+      const workerUrl = chrome.runtime.getURL('src/workers/scanner.worker.js');
+      const response = await fetch(workerUrl);
+      const code = await response.text();
+      const blob = new Blob([code], { type: 'application/javascript' });
+      
+      this.worker = new Worker(URL.createObjectURL(blob));
       this.worker.onmessage = (e) => this.handleWorkerMessage(e.data);
       console.log("[DevLens] Background Scanner Worker Initialized.");
+      return true;
     } catch (err) {
-      console.error("[DevLens] Failed to initialize worker. Falling back to main thread.", err);
+      this.worker = null;
+      if (store.debug) console.warn("[DevLens] Global worker init failed:", err);
+      return false;
     }
   }
 
@@ -450,6 +489,13 @@ export class DevLensUI {
            <div><label>Size</label><input type="text" data-prop="fontSize" class="prop-input" value="${formatMix(getVal('fontSize'))}"></div>
         </div>
       </div>
+
+      <div class="prop-section" id="animation-controls">
+        <div class="section-title">Animations</div>
+        <div id="animation-list" style="margin-top:8px;">
+           <div class="empty-selection-state" style="padding:10px;"><p style="font-size:10px;">No active animations detected.</p></div>
+        </div>
+      </div>
     `;
   }
 
@@ -468,6 +514,55 @@ export class DevLensUI {
        revertBtn.addEventListener('click', () => {
           store.selection.forEach(id => revertNode(id));
        });
+    }
+
+    this.renderAnimations(panel);
+  }
+
+  renderAnimations(panel) {
+    const animList = panel.querySelector('#animation-list');
+    if (!animList || store.selection.length !== 1) return;
+
+    const node = store.nodes.get(store.selection[0]);
+    if (!node || !node.element) return;
+
+    try {
+      const animations = node.element.getAnimations ? node.element.getAnimations() : [];
+      if (animations.length === 0) return;
+
+      animList.innerHTML = animations.map((anim, i) => {
+        const duration = anim.effect?.getComputedTiming().duration || 0;
+        const progress = anim.currentTime || 0;
+        const easing = anim.effect?.getComputedTiming().easing || 'linear';
+
+        return `
+          <div class="animation-item" style="margin-bottom:12px; padding:8px; background:rgba(255,255,255,0.03); border-radius:4px; border:1px solid rgba(255,255,255,0.05);">
+             <div style="display:flex; justify-content:space-between; font-size:10px; color:#aaa; margin-bottom:4px;">
+                <span>Anim #${i+1}</span>
+                <span style="color:#61dafb;">${easing}</span>
+             </div>
+             <input type="range" class="anim-scrubber" data-index="${i}" min="0" max="${duration}" value="${progress}" style="width:100%;">
+             <div style="display:flex; justify-content:space-between; font-size:9px; color:#666; margin-top:4px;">
+                <span>0ms</span>
+                <span>${duration}ms</span>
+             </div>
+          </div>
+        `;
+      }).join('');
+
+      animList.querySelectorAll('.anim-scrubber').forEach(scrubber => {
+        scrubber.addEventListener('input', (e) => {
+          const idx = parseInt(e.target.dataset.index);
+          const animation = animations[idx];
+          if (animation) {
+             animation.pause();
+             animation.currentTime = parseFloat(e.target.value);
+          }
+        });
+      });
+
+    } catch (err) {
+      console.warn("[DevLens] Animation control failed safely:", err);
     }
   }
 
@@ -561,22 +656,41 @@ export class DevLensUI {
           return;
         }
 
-        const snapshot = buildSnapshot(rootEl);
-
-        // Phase 2: Background Worker Processing
+        // Phase 2: Processing (Worker with Main-Thread Fallback)
         store.currentJobId = crypto.randomUUID();
-        compileBtn.textContent = 'Worker Processing...';
-
-        this.worker.postMessage({
-          type: 'GENERATE_IR',
-          jobId: store.currentJobId,
-          payload: { snapshot }
-        });
-
-        // We now wait for the worker to echo back via onIRComplete
-        // The actual generation logic moves to a private method
         this.pendingMode = this.root.querySelector('#codegen-mode').value;
         this.compileBtn = compileBtn;
+
+        // Ensure we know the final status of worker initialization
+        await this.workerPromise;
+
+        if (this.worker) {
+          compileBtn.textContent = 'Worker Processing...';
+          const snapshot = buildSnapshot(rootEl);
+          this.worker.postMessage({
+            type: 'GENERATE_IR',
+            jobId: store.currentJobId,
+            payload: { snapshot }
+          });
+        } else {
+          // CSP Fallback: Main Thread Execution
+          compileBtn.textContent = 'Main Thread Sync...';
+          setTimeout(() => { // Async to prevent UI lockup immediately
+            try {
+              buildExportIR([store.selection[0]]);
+              const result = {
+                rootId: store.selection[0],
+                nodes: Array.from(exportIR.entries())
+              };
+              this.onIRComplete(result);
+            } catch (err) {
+              console.error("[DevLens] Main-thread fallback failed:", err);
+              this.showToast("Critial Scan Failure.");
+              this.isSyncing = false;
+              compileBtn.textContent = 'Compile Selection';
+            }
+          }, 50);
+        }
       });
     }
 

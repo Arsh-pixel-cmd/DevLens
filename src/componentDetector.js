@@ -6,6 +6,31 @@
  */
 
 export class ComponentDetector {
+  static globalIndex = new Map();
+  static isIndexed = false;
+
+  static buildGlobalIndex() {
+     if (this.isIndexed) return;
+     
+     // Extremely fast single-pass precomputation cache mapped efficiently by signature
+     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+     while(walker.nextNode()) {
+        const el = walker.currentNode;
+        if (el.id === 'devlens-host') continue;
+        
+        const sig = `${el.tagName.toLowerCase()}.${[...el.classList].sort().join('.')}`;
+        if (!this.globalIndex.has(sig)) this.globalIndex.set(sig, 0);
+        this.globalIndex.set(sig, this.globalIndex.get(sig) + 1);
+     }
+     this.isIndexed = true;
+  }
+
+  static getGlobalMatchCount(nodeElement) {
+     if (!this.isIndexed) this.buildGlobalIndex();
+     const sig = `${nodeElement.tagName.toLowerCase()}.${[...nodeElement.classList].sort().join('.')}`;
+     return this.globalIndex.get(sig) || 1;
+  }
+
   constructor(irNodes) {
     this.nodes = irNodes; // Map of NodeIRs
     this.components = new Map(); 

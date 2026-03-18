@@ -31,7 +31,10 @@
                 "src/styleNormalizer.js",
                 "src/componentDetector.js",
                 "src/codegen/reactGenerator.js",
-                "src/codegen/tailwindMapper.js"
+                "src/codegen/tailwindMapper.js",
+                "src/mainWorld.js",
+                "src/dataInspector.js",
+                "src/layoutInspector.js"
             ],
             "matches": [
                 "<all_urls>"

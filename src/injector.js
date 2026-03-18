@@ -55,16 +55,18 @@
 
         // Import Modules
         try {
-            const [{ DevLensUI }, { DevLensScanner }] = await Promise.all([
+            const [{ DevLensUI }, { DevLensScanner }, { DataInspector }] = await Promise.all([
                 import(chrome.runtime.getURL('src/ui.js')),
-                import(chrome.runtime.getURL('src/scanner.js'))
+                import(chrome.runtime.getURL('src/scanner.js')),
+                import(chrome.runtime.getURL('src/dataInspector.js'))
             ]);
 
             // Init Scanner
             scannerInstance = new DevLensScanner();
+            const dataInspectorBase = new DataInspector();
 
             // Init UI
-            uiInstance = new DevLensUI(container, techData, scannerInstance);
+            uiInstance = new DevLensUI(container, techData, scannerInstance, dataInspectorBase);
 
             uiInstance.render();
 

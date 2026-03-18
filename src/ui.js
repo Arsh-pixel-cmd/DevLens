@@ -2,9 +2,9 @@
 import { store } from './store.js';
 import { eventBus } from './eventBus.js';
 import { updateStyle, batchUpdateStyles, getMultiStyle, revertNode } from './styleEngine.js';
-import { buildExportIR, exportIR } from './irBuilder.js';
 import { ComponentRipper } from './ripper.js';
 import { ComponentDetector } from './componentDetector.js';
+import { detectLayoutIntent } from './layoutInspector.js';
 import { ReactGenerator } from './codegen/reactGenerator.js';
 import { copyToClipboard } from './clipboard.js';
 
@@ -17,10 +17,11 @@ function debounce(func, wait) {
 }
 
 export class DevLensUI {
-  constructor(root, techData, scanner) {
+  constructor(root, techData, scanner, dataInspector) {
     this.root = root;
     this.techData = techData;
     this.scanner = scanner;
+    this.dataInspector = dataInspector;
     
     // Instantiate our new State-Driven Ripper
     this.ripper = new ComponentRipper(this);
@@ -41,21 +42,23 @@ export class DevLensUI {
         </div>
 
         <div class="devlens-tabs">
-          <div class="devlens-tab" data-tab="tech">Tech</div>
-          <div class="devlens-tab active" data-tab="design">Properties</div>
+          <div class="devlens-tab active" data-tab="intelligence">Insights</div>
+          <div class="devlens-tab" data-tab="design">Properties</div>
           <div class="devlens-tab" data-tab="export">Codegen</div>
         </div>
 
         <div class="devlens-content">
-          <div id="panel-tech" class="devlens-panel">
-             ${this.renderTechTab()}
-          </div>
-          
-          <div id="panel-design" class="devlens-panel active">
-             <!-- Live Style Panel Injected Here -->
+          <div id="panel-intelligence" class="devlens-panel active">
              <div class="empty-selection-state">
                 <button class="btn-primary" id="toggle-ripper">Select Element</button>
-                <p>Click an element on the page to inspect and edit.</p>
+                <p>Click an element to trace React Fiber data, List components, and deep layout parameters.</p>
+             </div>
+          </div>
+          
+          <div id="panel-design" class="devlens-panel">
+             <div class="empty-selection-state">
+                <button class="btn-primary" id="toggle-ripper">Select Element</button>
+                <p>Click an element to see structural limits.</p>
              </div>
           </div>
           
@@ -79,6 +82,8 @@ export class DevLensUI {
     // Global EventBus Subscribers
     eventBus.on("selection:change", () => this.syncPanelToSelection());
     eventBus.on("style:update", () => this.syncPanelToSelection());
+    eventBus.on("inspection:start", () => this.showInsightLoadingState());
+    eventBus.on("inspection:data_complete", (res) => this.renderInsightFusion(res));
 
     // Initialize State Mappings
     this.syncPanelToSelection();
@@ -86,27 +91,113 @@ export class DevLensUI {
 
   syncPanelToSelection() {
     const designPanel = this.root.querySelector('#panel-design');
-    if (!designPanel) return;
+    const intelPanel = this.root.querySelector('#panel-intelligence');
+    if (!designPanel || !intelPanel) return;
 
     if (store.selection.length === 0) {
-      designPanel.innerHTML = `
+      const emptyHTML = `
         <div class="empty-selection-state">
            <button class="btn-primary" id="toggle-ripper">${store.mode === "inspect" ? "Stop Inspecting" : "Select Element"}</button>
            <p>${store.mode === "inspect" ? "Hover to highlight, Click to select." : "No elements selected."}</p>
         </div>
       `;
-      const btn = designPanel.querySelector('#toggle-ripper');
-      if (btn) btn.addEventListener('click', () => this.ripper.toggle(store.mode !== "inspect"));
+      designPanel.innerHTML = emptyHTML;
+      intelPanel.innerHTML = emptyHTML;
+      
+      this.root.querySelectorAll('#toggle-ripper').forEach(btn => {
+         btn.addEventListener('click', () => this.ripper.toggle(store.mode !== "inspect"));
+      });
       return;
     }
 
     // A node is selected, render the Figma sidebar controls
     designPanel.innerHTML = this.renderPropertiesSidebar();
     this.attachPropertiesEvents(designPanel);
+
+    // Trigger Async Data Extraction Pipeline for Insights Tab if single select
+    if (store.selection.length === 1 && this.dataInspector) {
+        this.dataInspector.runInspection(store.selection[0]);
+    } else {
+        intelPanel.innerHTML = `<div class="empty-selection-state"><p>Insight Fusion runs exclusively on single element selections.</p></div>`;
+    }
+  }
+
+  showInsightLoadingState() {
+     const panel = this.root.querySelector('#panel-intelligence');
+     if (!panel) return;
+     panel.innerHTML = `
+       <div class="empty-selection-state">
+          <p>⚙️ Hooking Framework Runtime...</p>
+       </div>
+     `;
+  }
+
+  renderInsightFusion(dataResult) {
+     const panel = this.root.querySelector('#panel-intelligence');
+     if (!panel || store.selection.length === 0) return;
+
+     const node = store.nodes.get(store.selection[0]);
+     if (!node) return;
+
+     // 1. O(1) Component Lookup
+     const instances = ComponentDetector.getGlobalMatchCount(node.element);
+     const reuseText = instances > 1 
+       ? `<span style="color:#a6e22e">Reusable Component (${instances} instances)</span>` 
+       : `Isolated Node (1 instance)`;
+
+     // 2. Layout Intent Extraction
+     const layout = detectLayoutIntent(node);
+
+     // 3. Data Awareness Visualization
+     let dataBlock = `<div style="color:#888; font-size:11px;">No Framework Context Found</div>`;
+     if (dataResult.fiber && !dataResult.fiber.error && dataResult.fiber.componentName) {
+         dataBlock = `
+           <div style="background:rgba(97,218,251,0.1); border:1px solid #61dafb; padding:8px; border-radius:4px;">
+              <strong style="color:#61dafb;">React Fiber ⚛️</strong><br>
+              <span style="font-size:11px;">Component: <code>&lt;${dataResult.fiber.componentName} /&gt;</code></span>
+              <div style="margin-top:6px; max-height:100px; overflow:auto;">
+                 <pre style="font-size:9px; color:#ccc; margin:0;">${JSON.stringify(dataResult.fiber.props || {}, null, 2)}</pre>
+              </div>
+           </div>
+         `;
+     } else if (dataResult.nextData) {
+         dataBlock = `
+           <div style="background:rgba(255,255,255,0.1); border:1px solid #aaa; padding:8px; border-radius:4px;">
+              <strong>Next.js __NEXT_DATA__ 🚀</strong><br>
+              <code style="font-size:10px; color:#a6e22e;">${dataResult.nextData.value}</code><br>
+              <div style="font-size:9px; color:#888; margin-top:4px;">Path: ${dataResult.nextData.path}</div>
+              <div style="font-size:9px; color:#888;">Confidence: ${(dataResult.nextData.confidence * 100).toFixed(0)}%</div>
+           </div>
+         `;
+     }
+
+     panel.innerHTML = `
+        <div class="props-header" style="margin-bottom:12px;">
+           <span class="selection-count">Context-Aware Fusion</span>
+        </div>
+        
+        <div class="prop-section">
+          <div class="section-title">Component Intelligence</div>
+          <div style="font-size:11px; padding:8px; background:rgba(0,0,0,0.2); border-radius:4px;">${reuseText}</div>
+        </div>
+
+        <div class="prop-section">
+          <div class="section-title">Layout Telemetry <span style="float:right; color:#888;">Conf: ${(layout.confidence * 100).toFixed(0)}%</span></div>
+          <div style="font-size:11px; padding:8px; background:rgba(0,0,0,0.2); border-radius:4px; line-height:1.4;">
+            <strong>System:</strong> ${layout.type.toUpperCase()}<br>
+            <strong>Logic:</strong> ${layout.alignment || 'Static Flow'}<br>
+            <strong style="color:#ff79c6;">Scale:</strong> ${layout.spacingScale}
+          </div>
+        </div>
+
+        <div class="prop-section">
+          <div class="section-title">Data Binding Layer</div>
+          ${dataBlock}
+        </div>
+     `;
   }
 
   renderPropertiesSidebar() {
-    // Multi-Select Resolvers
     const getVal = (prop) => getMultiStyle(store.selection, prop) || '';
     const formatMix = (val) => val === 'MIXED' ? '—' : val;
 
@@ -119,7 +210,7 @@ export class DevLensUI {
       </div>
 
       <div class="prop-section">
-        <div class="section-title">Layout</div>
+        <div class="section-title">Layout Override</div>
         <div class="prop-row">
           <label>Display</label>
           <select data-prop="display" class="prop-input">
@@ -199,7 +290,6 @@ export class DevLensUI {
       input.addEventListener('input', (e) => {
          const prop = e.target.getAttribute('data-prop');
          let val = e.target.value;
-         // Pass to Debounced Style Engine caller
          this.debouncedUpdate(prop, val);
       });
     });
@@ -218,7 +308,6 @@ export class DevLensUI {
     if (store.selection.length === 1) {
        updateStyle(store.selection[0], prop, val); // Fast Track
     } else {
-       // Multi-select Batch track for proper undo history blocks later
        const changes = store.selection.map(id => ({ nodeId: id, property: prop, value: val }));
        batchUpdateStyles(changes);
     }
@@ -250,19 +339,9 @@ export class DevLensUI {
            return;
          }
 
-         // Step 1: Force deep IR sync for export
-         buildExportIR(store.selection);
-
-         // Step 2: Component Clustering Map
-         const detector = new ComponentDetector(exportIR);
-         const { components, lists } = detector.detectPatterns();
-
-         // Step 3: Run Deterministic React Generator
-         const generator = new ReactGenerator(exportIR, components);
-         // Generate code anchored on the Primary Selected Node natively
+         const generator = new ReactGenerator(null, null);
          const code = generator.generate(store.primary);
 
-         // Render UI
          this.root.querySelector('.code-export').value = code;
          
          const score = generator.getVerificationScore();
@@ -283,16 +362,11 @@ export class DevLensUI {
     }
   }
 
-  renderTechTab() {
-    return `<div style="padding: 10px; color:#aaa; font-size:12px;">Tech Radar currently disabled while running inside NextGen codegen UI.</div>`;
-  }
-
   updateRipperState(active) {
-    const btn = this.root.querySelector('#toggle-ripper');
-    if (btn) {
+    this.root.querySelectorAll('#toggle-ripper').forEach(btn => {
       btn.textContent = active ? 'Stop Inspecting' : 'Select Element';
       btn.classList.toggle('active', active);
-    }
+    });
   }
 
   showToast(msg) {

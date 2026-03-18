@@ -13,8 +13,8 @@ export class AIRefiner {
   }
 
   async _fetch(prompt) {
-    if (!this.baseUrl || !this.apiKey) {
-      throw new Error("Missing AI Configuration (API Key or Base URL).");
+    if (!this.baseUrl || !this.apiKey || this.apiKey === 'mock-local-key') {
+      throw new Error("Missing AI Configuration (API Key or Base URL). Please configure your credentials in the Codegen tab.");
     }
 
     const res = await new Promise((resolve) => {

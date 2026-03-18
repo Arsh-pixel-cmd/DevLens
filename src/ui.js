@@ -159,14 +159,27 @@ export class DevLensUI {
              
              <div style="margin-bottom:24px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
                 <label class="section-title" style="display:block; margin-bottom:6px; color:#a6e22e;">✨ Universal AI Refinement</label>
-                <div style="font-size:10px; color:#aaa; margin-bottom:12px; line-height:1.4;">Connect to ANY model supporting the standard Chat format (OpenAI, Groq, Ollama, OpenRouter).</div>
+                <div style="font-size:10px; color:#aaa; margin-bottom:12px; line-height:1.4;">Select a provider and enter your key to enable AI features.</div>
                 
-                <div style="display:flex; flex-direction:column; gap:8px;">
-                   <input type="text" id="ai-url" class="prop-input" placeholder="Base URL (e.g. https://api.openai.com/v1/chat/completions)" style="width:100%; padding:8px;">
-                   <div style="display:flex; gap:8px;">
-                      <input type="text" id="ai-model" class="prop-input" placeholder="Target Model (e.g. gpt-4)" style="flex:1; padding:8px;">
-                      <input type="password" id="ai-key" class="prop-input" placeholder="API Key" style="flex:1; padding:8px;">
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                   <select id="ai-provider" class="prop-input" style="width:100%; padding:8px;">
+                      <option value="openai">OpenAI (GPT-4o)</option>
+                      <option value="groq">Groq (Llama 3.3)</option>
+                      <option value="openrouter">OpenRouter (Auto)</option>
+                      <option value="custom">Custom / Local (Ollama)</option>
+                   </select>
+
+                   <div id="ai-provider-help" style="font-size:10px; color:#61dafb; margin-top:-4px;">
+                      <a id="provider-link" href="https://platform.openai.com/api-keys" target="_blank" style="color:inherit; text-decoration:none;">Get OpenAI Key ↗</a>
                    </div>
+
+                   <div id="ai-custom-fields" style="display:none; flex-direction:column; gap:8px;">
+                      <input type="text" id="ai-url" class="prop-input" placeholder="Base URL" style="width:100%; padding:8px;">
+                      <input type="text" id="ai-model" class="prop-input" placeholder="Model ID" style="width:100%; padding:8px;">
+                   </div>
+                   
+                   <input type="password" id="ai-key" class="prop-input" placeholder="Enter API Key" style="width:100%; padding:8px;">
+                   
                    <button class="btn-primary" id="save-key" style="width:100%; padding:8px; margin-top:4px;">Save Configuration</button>
                 </div>
              </div>
@@ -385,6 +398,12 @@ export class DevLensUI {
         if (!node) throw new Error("Failed to extract element metadata.");
 
         const stored = await new Promise(r => chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model'], r));
+        
+        if (!stored.ai_key || stored.ai_key === 'mock-local-key') {
+           this.root.querySelector('[data-tab="export"]').click();
+           throw new Error("API Key Missing. Please enter your key in the Codegen tab.");
+        }
+
         const refiner = new AIRefiner(stored.ai_key, stored.ai_url, stored.ai_model);
         
         const prompt = `Explain this UI element's layout and logic in 3 sentences. 
@@ -694,24 +713,59 @@ export class DevLensUI {
     const inputKey = this.root.querySelector('#ai-key');
     const inputUrl = this.root.querySelector('#ai-url');
     const inputModel = this.root.querySelector('#ai-model');
-    
-    // Set absolute defaults natively in the UI mapping
-    inputUrl.value = 'https://api.openai.com/v1/chat/completions';
-    inputModel.value = 'gpt-4o';
+    const providerSelect = this.root.querySelector('#ai-provider');
+    const customFields = this.root.querySelector('#ai-custom-fields');
+    const providerLink = this.root.querySelector('#provider-link');
+
+    const providerConfigs = {
+      openai: { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o', link: 'https://platform.openai.com/api-keys', name: 'OpenAI' },
+      groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', link: 'https://console.groq.com/keys', name: 'Groq' },
+      openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions', model: 'auto', link: 'https://openrouter.ai/keys', name: 'OpenRouter' },
+      custom: { url: '', model: '', link: '', name: 'Custom' }
+    };
+
+    const updateProviderUI = (provider) => {
+      const config = providerConfigs[provider];
+      if (provider === 'custom') {
+         customFields.style.display = 'flex';
+         providerLink.parentElement.style.display = 'none';
+      } else {
+         customFields.style.display = 'none';
+         providerLink.parentElement.style.display = 'block';
+         providerLink.href = config.link;
+         providerLink.textContent = `Get ${config.name} Key ↗`;
+         inputUrl.value = config.url;
+         inputModel.value = config.model;
+      }
+    };
+
+    providerSelect.addEventListener('change', (e) => updateProviderUI(e.target.value));
     
     if (saveKeyBtn) {
-       chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model'], (res) => {
-          if (res.ai_key) inputKey.value = "********";
+       chrome.storage.local.get(['ai_key', 'ai_url', 'ai_model', 'ai_provider'], (res) => {
+          if (res.ai_provider) {
+             providerSelect.value = res.ai_provider;
+             updateProviderUI(res.ai_provider);
+          } else {
+             updateProviderUI('openai'); // Default
+          }
+          if (res.ai_key && res.ai_key !== 'mock-local-key') inputKey.value = "********";
           if (res.ai_url) inputUrl.value = res.ai_url;
           if (res.ai_model) inputModel.value = res.ai_model;
        });
+
        saveKeyBtn.addEventListener('click', () => {
+          const provider = providerSelect.value;
           if (inputKey.value && inputKey.value !== "********") {
              chrome.storage.local.set({ ai_key: inputKey.value });
              inputKey.value = "********";
           }
-          chrome.storage.local.set({ ai_url: inputUrl.value, ai_model: inputModel.value });
-          this.showToast('AI Config Saved Natively!');
+          chrome.storage.local.set({ 
+             ai_url: inputUrl.value, 
+             ai_model: inputModel.value,
+             ai_provider: provider 
+          });
+          this.showToast('AI Config Saved!');
        });
     }
 
@@ -948,11 +1002,13 @@ export class DevLensUI {
           const useUrl = stored.ai_url || 'https://api.openai.com/v1/chat/completions';
           const useModel = stored.ai_model || 'gpt-4o';
           
-          if (useUrl && useModel) {
+          if (useUrl && useModel && useKey !== 'mock-local-key') {
              const refiner = new AIRefiner(useKey, useUrl, useModel);
              const aiResult = await refiner.refine(code, exportIR, score);
              code = aiResult.code;
              aiMode = aiResult.mode;
+          } else if (mode === "abstract") {
+             this.showToast("AI Refinement skipped: Missing API Key.");
           }
       }
 

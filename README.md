@@ -11,7 +11,7 @@
 
 ## 🚀 Overview
 
-**DevLens Ultra** is a professional-grade engineering tool built to dissect modern web applications. It uses advanced **DOM Analysis**, **System 4 IR Scanning**, and **Heuristic Pattern Detection** to reveal the DNA of any website.
+**DevLens Ultra** is a professional-grade engineering tool built to dissect modern web applications It is **Figma + DevTools + Code Generator**. It uses advanced **DOM Analysis**, **System 4 IR Scanning**, and **Heuristic Pattern Detection** to reveal the DNA of any website.
 
 Built with performance in mind, it operates inside a **Shadow DOM** to ensure zero CSS bleed and leverages **Manifest V3 Service Workers** for non-blocking network analysis.
 
